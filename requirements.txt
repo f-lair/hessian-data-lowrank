@@ -1,0 +1,12 @@
+flax==0.7.4
+jax==0.4.19
+jaxlib==0.4.19
+matplotlib==3.8.0
+numpy==1.26.1
+optax==0.1.7
+pandas==2.1.1
+scipy==1.11.3
+torch==2.1.0
+torchvision==0.16.0
+tqdm==4.66.1
+tueplots==0.0.11
