@@ -1,3 +1,4 @@
+import random
 from typing import Any, List
 
 import jax
@@ -55,6 +56,19 @@ class DataLoader(data.DataLoader):
             collate_fn=self.collate_fn,
             generator=rng,
         )
+
+    @staticmethod
+    def worker_init(worker_id: int, rng_seed: int) -> None:
+        """
+        Initialization method for data loader workers, which fixes the random number generator seed.
+
+        Args:
+            worker_id (int): Worker ID.
+            rng_seed (int): Random number generator seed.
+        """
+
+        np.random.seed(rng_seed)
+        random.seed(rng_seed)
 
     @staticmethod
     def collate_fn(batch: List[Any]) -> jax.Array:
