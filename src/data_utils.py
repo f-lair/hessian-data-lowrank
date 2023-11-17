@@ -1,4 +1,3 @@
-import random
 from typing import Any, List
 
 import jax
@@ -34,41 +33,50 @@ def get_dataset(dataset: str, train: bool, px: int, path: str) -> data.Dataset:
         raise ValueError(f"Unsupported dataset: {dataset}")
 
 
-class DataLoader(data.DataLoader):
-    """Deterministicly shuffled PyTorch data loader."""
+def get_sampler(sampling: str, dataset: data.Dataset, rng_seed: int) -> data.Sampler:
+    """
+    Returns data sampler specified by CLI arguments.
 
-    def __init__(self, dataset: data.Dataset, batch_size: int, rng_seed: int):
+    Args:
+        sampling (str): Sampling method.
+        dataset (data.Dataset): Dataset.
+        rng_seed (int): RNG seed.
+
+    Raises:
+        ValueError: Unsupported sampling method.
+
+    Returns:
+        data.Sampler: Data sampler specified by CLI arguments.
+    """
+
+    rng = torch.manual_seed(rng_seed)
+
+    if sampling == "uniform":
+        return data.RandomSampler(dataset, generator=rng)  # type: ignore
+    else:
+        raise ValueError(f"Unsupported sampling: {sampling}")
+
+
+class DataLoader(data.DataLoader):
+    """PyTorch data loader with jax-compatible collate function."""
+
+    def __init__(self, dataset: data.Dataset, batch_size: int, sampler: data.Sampler):
         """
         Initializes data loader.
 
         Args:
             dataset (data.Dataset): Dataset.
             batch_size (int): Batch size.
-            rng_seed (int): RNG seed.
+            sampler (data.Sampler): Data sampler.
         """
 
-        rng = torch.manual_seed(rng_seed)
         super().__init__(
             dataset,
             batch_size=batch_size,
-            shuffle=True,
             num_workers=0,
             collate_fn=self.collate_fn,
-            generator=rng,
+            sampler=sampler,
         )
-
-    @staticmethod
-    def worker_init(worker_id: int, rng_seed: int) -> None:
-        """
-        Initialization method for data loader workers, which fixes the random number generator seed.
-
-        Args:
-            worker_id (int): Worker ID.
-            rng_seed (int): Random number generator seed.
-        """
-
-        np.random.seed(rng_seed)
-        random.seed(rng_seed)
 
     @staticmethod
     def collate_fn(batch: List[Any]) -> jax.Array:
