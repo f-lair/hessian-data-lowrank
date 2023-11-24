@@ -6,6 +6,7 @@ from flax.training.train_state import TrainState
 from tqdm import trange
 
 from data_utils import DataLoader, get_dataset, get_sampler
+from log_utils import save_train_log
 from model import get_model
 from train_utils import test_epoch, train_epoch
 
@@ -85,11 +86,14 @@ def main() -> None:
     ]
     n_ggn_iterations = args.ggn_iterations
     n_steps = 0
+    train_log = {"train_acc": [], "train_loss": [], "test_acc": [], "test_loss": []}
+    train_log.update({f"train_acc_c{idx}": [] for idx in range(len(train_dataset.classes))})  # type: ignore
+    train_log.update({f"test_acc_c{idx}": [] for idx in range(len(test_dataset.classes))})  # type: ignore
 
     # Start training
     for epoch_idx in pbar:
         # Perform training epoch
-        train_state, loss, accuracy, n_steps, n_ggn_iterations = train_epoch(
+        train_state, loss, accuracy, accuracy_per_class, n_steps, n_ggn_iterations = train_epoch(
             train_state,
             train_dataloader,
             ggn_dataloader,
@@ -102,17 +106,30 @@ def main() -> None:
         )
         pbar_stats["loss"] = round(loss, 6)
         pbar_stats["acc"] = round(accuracy, 4)
+        # Update train log
+        train_log["train_loss"].append(loss)
+        train_log["train_acc"].append(accuracy)
+        for idx, val in enumerate(accuracy_per_class):
+            train_log[f"train_acc_c{idx}"].append(val)
 
         # Perform testing epoch
         if not args.no_testing:
-            test_loss, test_accuracy = test_epoch(
+            test_loss, test_accuracy, test_accuracy_per_class = test_epoch(
                 train_state, test_dataloader, args.no_progress_bar
             )
             pbar_stats["test-loss"] = round(test_loss, 6)
             pbar_stats["test-acc"] = round(test_accuracy, 4)
+            # Update train log
+            train_log["test_loss"].append(test_loss)
+            train_log["test_acc"].append(test_accuracy)
+            for idx, val in enumerate(test_accuracy_per_class):
+                train_log[f"test_acc_c{idx}"].append(val)
 
         # Update progress bar
         pbar.set_postfix(pbar_stats)
+
+    # Save train log
+    save_train_log(train_log, args.results_path)
 
 
 if __name__ == "__main__":

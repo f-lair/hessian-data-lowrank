@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Any, List, Tuple
 
 import jax
@@ -9,13 +10,14 @@ from jax import tree_util
 from tqdm import tqdm
 
 from data_utils import DataLoader
-from log_utils import save_results
+from log_utils import save_ggn
 
 
-@jax.jit
 def train_step(
-    state: TrainState, batch: Tuple[jax.Array, jax.Array]
-) -> Tuple[TrainState, jax.Array, jax.Array]:
+    state: TrainState,
+    batch: Tuple[jax.Array, jax.Array],
+    n_classes: int,
+) -> Tuple[TrainState, jax.Array, jax.Array, jax.Array]:
     """
     Performs a single training step without GGN computation.
     C: Model output dim.
@@ -25,12 +27,14 @@ def train_step(
     Args:
         state (TrainState): Current training state.
         batch (Tuple[jax.Array, jax.Array]): Batched input data.
+        n_classes (int): Number of classes (equal to C).
 
     Returns:
-        Tuple[TrainState, jax.Array, jax.Array]:
+        Tuple[TrainState, jax.Array, jax.Array, jax.Array]:
             Updated training state,
             per-item loss ([N]),
-            number of correct predictions ([1]).
+            number of correct predictions per class ([C]),
+            number of ground-truth items per class ([C]).
     """
 
     def model_loss_fn(
@@ -63,18 +67,33 @@ def train_step(
     (_, (loss, logits)), d_loss = jax.value_and_grad(model_loss_fn, has_aux=True)(
         state.params, x, y
     )  # [N]; [N, C]; [D], pytree in D
-    n_correct = jnp.sum(jnp.argmax(logits, -1) == y)  # [1]
+
+    # Compute number of correct predictions per class
+    correct = (jnp.argmax(logits, -1) == y).astype(int)  # [N]
+    # Add dummy false predictions to account for every class
+    y_dummy = jnp.concatenate((y, jnp.arange(n_classes, dtype=int)))  # [N+C]
+    correct_dummy = jnp.concatenate((correct, jnp.zeros((n_classes,), dtype=int)))  # [N+C]
+    n_correct_per_class = jnp.bincount(y_dummy, correct_dummy, length=n_classes)  # [C]
+    n_per_class = jnp.bincount(
+        y_dummy,
+        jnp.concatenate((jnp.ones_like(y), jnp.zeros((n_classes,), dtype=int))),
+        length=n_classes,
+    )  # [C]
 
     # Perform gradient step, update training state
     state = state.apply_gradients(grads=d_loss)
 
-    return state, loss, n_correct
+    return state, loss, n_correct_per_class, n_per_class
 
 
-@jax.jit
 def test_step(
-    state: TrainState, batch: Tuple[jax.Array, jax.Array]
-) -> Tuple[jax.Array, jax.Array]:
+    state: TrainState,
+    batch: Tuple[
+        jax.Array,
+        jax.Array,
+    ],
+    n_classes: int,
+) -> Tuple[jax.Array, jax.Array, jax.Array]:
     """
     Performs a single test step without GGN computation.
     C: Model output dim.
@@ -84,11 +103,13 @@ def test_step(
     Args:
         state (TrainState): Current training state.
         batch (Tuple[jax.Array, jax.Array]): Batched input data.
+        n_classes (int): Number of classes (equal to C).
 
     Returns:
-        Tuple[jax.Array, jax.Array]:
+        Tuple[jax.Array, jax.Array, jax.Array]:
             Per-item loss ([N]),
-            number of correct predictions ([1]).
+            number of correct predictions per class ([C]),
+            number of ground-truth items per class ([C]).
     """
 
     def model_loss_fn(
@@ -119,9 +140,20 @@ def test_step(
 
     # Forward pass
     _, (loss, logits) = model_loss_fn(state.params, x, y)  # [N]; [N, C]
-    n_correct = jnp.sum(jnp.argmax(logits, -1) == y)  # [1]
 
-    return loss, n_correct
+    # Compute number of correct predictions per class
+    correct = (jnp.argmax(logits, -1) == y).astype(int)  # [N]
+    # Add dummy false predictions to account for every class
+    y_dummy = jnp.concatenate((y, jnp.arange(n_classes, dtype=int)))  # [N+C]
+    correct_dummy = jnp.concatenate((correct, jnp.zeros((n_classes,), dtype=int)))  # [N+C]
+    n_correct_per_class = jnp.bincount(y_dummy, correct_dummy, length=n_classes)  # [C]
+    n_per_class = jnp.bincount(
+        y_dummy,
+        jnp.concatenate((jnp.ones_like(y), jnp.zeros((n_classes,), dtype=int))),
+        length=n_classes,
+    )  # [C]
+
+    return loss, n_correct_per_class, n_per_class
 
 
 @jax.jit
@@ -212,7 +244,7 @@ def train_epoch(
     n_steps: int,
     no_progress_bar: bool,
     results_path: str,
-) -> Tuple[TrainState, float, float, int, int]:
+) -> Tuple[TrainState, float, float, jax.Array, int, int]:
     """
     Performs a single training epoch.
 
@@ -228,17 +260,23 @@ def train_epoch(
         results_path (str): Results path.
 
     Returns:
-        Tuple[TrainState, float, float, int, int]:
+        Tuple[TrainState, float, float, jax.Array, int, int]:
             Updated training state,
             epoch loss,
             epoch accuracy,
+            epoch accuracy per class,
             current number of completed training step across epochs,
             number of remaining ggn iterations after this epoch.
     """
 
+    n_classes = len(train_dataloader.dataset.classes)  # type: ignore
+    train_step_jit = jax.jit(partial(train_step, n_classes=n_classes))
+
     # Running statistics
     loss_epoch = []  # Per-item losses per training steps
     n_correct_epoch = 0  # Number of correct predictions across the epoch
+    n_correct_per_class_epoch = jnp.zeros((n_classes,), dtype=int)
+    n_per_class_epoch = jnp.zeros_like(n_correct_per_class_epoch)
     GGN_iter_counter = 0  # Number of already completed GGN iterations
 
     # Start epoch
@@ -272,7 +310,7 @@ def train_epoch(
                         )  # [N, D, D]
                     # Save GGN samples on disk, if needed aggregated batch size reached
                     if aggregated_batch_size in ggn_batch_sizes:
-                        save_results(
+                        save_ggn(
                             GGN_samples, n_steps, results_path, batch_size=aggregated_batch_size
                         )
 
@@ -286,13 +324,19 @@ def train_epoch(
                         )  # [D, D]
 
                 # Save total GGN on disk
-                save_results(GGN_total, n_steps, results_path)
+                save_ggn(GGN_total, n_steps, results_path)
                 GGN_iter_counter += 1
 
             # Perform training step
-            state, loss, n_correct = train_step(state, batch)
+            state, loss, n_correct_per_class, n_per_class = train_step_jit(
+                state,
+                batch,
+            )
             # Update running statistics
             loss_epoch.append(loss)
+            n_correct_per_class_epoch = n_correct_per_class_epoch + n_correct_per_class
+            n_per_class_epoch = n_per_class_epoch + n_per_class
+            n_correct = n_correct_per_class.sum()
             n_correct_epoch += n_correct
             N = batch[0].shape[0]
             n_steps += 1
@@ -302,18 +346,19 @@ def train_epoch(
             pbar_stats["acc"] = round(n_correct / N, 4)
             pbar.set_postfix(pbar_stats)
 
-    # Compute final epoch statistics: Epoch loss, epoch accuracy
+    # Compute final epoch statistics: Epoch loss, epoch accuracy (per class)
     loss = jnp.mean(jnp.concatenate(loss_epoch)).item()  # [1]
     accuracy = float(n_correct_epoch / len(train_dataloader.dataset))  # type: ignore
+    accuracy_per_class = n_correct_per_class_epoch / n_per_class_epoch  # type: ignore
 
-    return state, loss, accuracy, n_steps, n_ggn_iterations - GGN_iter_counter
+    return state, loss, accuracy, accuracy_per_class, n_steps, n_ggn_iterations - GGN_iter_counter
 
 
 def test_epoch(
     state: TrainState,
     test_dataloader: DataLoader,
     no_progress_bar: bool,
-) -> Tuple[float, float]:
+) -> Tuple[float, float, jax.Array]:
     """
     Performs a single training epoch.
 
@@ -323,14 +368,20 @@ def test_epoch(
         no_progress_bar (bool): Disables progress bar.
 
     Returns:
-        Tuple[float, float]:
+        Tuple[float, float, jax.Array]:
             Epoch loss,
-            epoch accuracy.
+            epoch accuracy,
+            epoch accuracy per class.
     """
+
+    n_classes = len(test_dataloader.dataset.classes)  # type: ignore
+    test_step_jit = jax.jit(partial(test_step, n_classes=n_classes))
 
     # Running statistics
     loss_epoch = []  # Per-item losses per test steps
     n_correct_epoch = 0  # Number of correct predictions across the epoch
+    n_correct_per_class_epoch = jnp.zeros((n_classes,), dtype=int)
+    n_per_class_epoch = jnp.zeros_like(n_correct_per_class_epoch)
 
     # Start epoch
     pbar_stats = {"loss": 0.0, "acc": 0.0}
@@ -340,9 +391,12 @@ def test_epoch(
         # Iterate over dataset for testing
         for batch in test_dataloader:
             # Perform test step
-            loss, n_correct = test_step(state, batch)
+            loss, n_correct_per_class, n_per_class = test_step_jit(state, batch)
             # Update running statistics
             loss_epoch.append(loss)
+            n_correct_per_class_epoch = n_correct_per_class_epoch + n_correct_per_class
+            n_per_class_epoch = n_per_class_epoch + n_per_class
+            n_correct = n_correct_per_class.sum()
             n_correct_epoch += n_correct
             N = batch[0].shape[0]
             # Update progress bar
@@ -351,8 +405,9 @@ def test_epoch(
             pbar_stats["acc"] = round(n_correct / N, 4)
             pbar.set_postfix(pbar_stats)
 
-    # Compute final epoch statistics: Epoch loss, epoch accuracy
+    # Compute final epoch statistics: Epoch loss, epoch accuracy (per class)
     loss = jnp.mean(jnp.concatenate(loss_epoch)).item()  # [1]
     accuracy = float(n_correct_epoch / len(test_dataloader.dataset))  # type: ignore
+    accuracy_per_class = n_correct_per_class_epoch / n_per_class_epoch  # type: ignore
 
-    return loss, accuracy
+    return loss, accuracy, accuracy_per_class
