@@ -10,7 +10,7 @@ from jax import tree_util
 from tqdm import tqdm
 
 from data_utils import DataLoader
-from log_utils import save_ggn
+from log_utils import load_ggn, remove_ggn, save_ggn, save_norm
 
 
 def train_step(
@@ -242,6 +242,8 @@ def train_epoch(
     ggn_freq: int,
     n_ggn_iterations: int,
     n_steps: int,
+    norm_saving: str,
+    ggn_saving: str,
     no_progress_bar: bool,
     results_path: str,
 ) -> Tuple[TrainState, float, float, jax.Array, int, int]:
@@ -256,6 +258,8 @@ def train_epoch(
         ggn_freq (int): Frequency of GGN iterations.
         n_ggn_iterations (int): Number of GGN iterations.
         n_steps (int): Current number of completed training step across epochs.
+        norm_saving (str): GGN norm saving: disabled, total, next.
+        ggn_saving (str): GGN saving: disabled, decomposed, dense.
         no_progress_bar (bool): Disables progress bar.
         results_path (str): Results path.
 
@@ -288,10 +292,12 @@ def train_epoch(
         for batch in train_dataloader:
             # Compute GGN, if n_ggn_iterations not reached and current step is multiple of ggn_freq
             if GGN_iter_counter < n_ggn_iterations and n_steps % ggn_freq == 0:
+                GGN_iter_counter += 1
+
                 # Init running statistics for this GGN iteration
                 GGN_counter = 0  # Number of already computed per-item GGNs (for running average)
                 GGN_total = None  # Total GGN, encompassing all per-item GGNs across the dataset
-                GGN_samples = None  # GGN samples, encompassing GGNs over one/multiple data batches
+                GGN_samples = None  # GGN samples, aggregated over one/multiple data batches
 
                 # Iterate over dataset for GGN computation
                 for ggn_step_idx, ggn_batch in enumerate(
@@ -308,24 +314,80 @@ def train_epoch(
                         GGN_samples = GGN_samples + (GGN - GGN_samples) / (
                             aggregated_batch_size
                         )  # [N, D, D]
+
                     # Save GGN samples on disk, if needed aggregated batch size reached
-                    if aggregated_batch_size in ggn_batch_sizes:
-                        save_ggn(
-                            GGN_samples, n_steps, results_path, batch_size=aggregated_batch_size
+                    try:
+                        ggn_batch_size_idx = ggn_batch_sizes.index(aggregated_batch_size)
+                        if ggn_batch_size_idx > 0:
+                            prev_ggn_batch_size = ggn_batch_sizes[ggn_batch_size_idx - 1]
+                            # Norm-saving "next": Load previous batched GGN samples, compute norm
+                            if norm_saving == "next":
+                                prev_GGN_samples = load_ggn(
+                                    n_steps, results_path, batch_size=prev_ggn_batch_size
+                                )
+                                save_norm(
+                                    prev_GGN_samples,
+                                    GGN_samples,
+                                    n_steps,
+                                    results_path,
+                                    batch_size=prev_ggn_batch_size,
+                                )
+                            # GGN-saving "disabled" and not norm-saving "total": Remove previous batched GGN samples
+                            if ggn_saving == "disabled" and norm_saving != "total":
+                                remove_ggn(n_steps, results_path, batch_size=prev_ggn_batch_size)
+
+                        # Not norm-saving "next" or not ggn-saving "disabled" or not last GGN samples: Save GGN samples
+                        if (
+                            norm_saving != "next"
+                            or ggn_saving != "disabled"
+                            or ggn_batch_size_idx + 1 < len(ggn_batch_sizes)
+                        ):
+                            save_ggn(
+                                GGN_samples,
+                                n_steps,
+                                results_path,
+                                batch_size=aggregated_batch_size,
+                            )
+
+                        # Norm-saving "next" and last GGN samples: Stop further GGN computations
+                        if norm_saving == "next" and ggn_batch_size_idx + 1 == len(
+                            ggn_batch_sizes
+                        ):
+                            break
+
+                    except ValueError:
+                        # Only caught, if aggr. batch size not found in list of batch sizes -> no-op
+                        pass
+
+                    # Not GGN-saving "next": Compute total GGN as running average to save memory
+                    if ggn_saving != "next":
+                        GGN_counter += GGN.shape[0]
+                        if GGN_total is None:
+                            GGN_total = jnp.mean(GGN, axis=0)  # [D, D]
+                        else:
+                            GGN_total = (
+                                GGN_total
+                                + jnp.sum(GGN - GGN_total[None, :, :], axis=0) / GGN_counter
+                            )  # [D, D]
+
+                # GGN-saving "dense" and not Norm-saving "next": Save total GGN on disk
+                if ggn_saving == "dense" and norm_saving != "next":
+                    save_ggn(GGN_total, n_steps, results_path)  # type: ignore
+
+                # Norm-saving "total": Compute norm
+                if norm_saving == "total":
+                    for ggn_batch_size in ggn_batch_sizes:
+                        GGN_samples = load_ggn(n_steps, results_path, batch_size=ggn_batch_size)
+                        save_norm(
+                            GGN_samples,
+                            GGN_total,  # type: ignore
+                            n_steps,
+                            results_path,
+                            batch_size=ggn_batch_size,
                         )
-
-                    # Compute total GGN as running average to save memory
-                    GGN_counter += GGN.shape[0]
-                    if GGN_total is None:
-                        GGN_total = jnp.mean(GGN, axis=0)  # [D, D]
-                    else:
-                        GGN_total = (
-                            GGN_total + jnp.sum(GGN - GGN_total[None, :, :], axis=0) / GGN_counter
-                        )  # [D, D]
-
-                # Save total GGN on disk
-                save_ggn(GGN_total, n_steps, results_path)
-                GGN_iter_counter += 1
+                        # GGN-saving "disabled" : Remove batched GGN samples
+                        if ggn_saving == "disabled":
+                            remove_ggn(n_steps, results_path, batch_size=ggn_batch_size)
 
             # Perform training step
             state, loss, n_correct_per_class, n_per_class = train_step_jit(

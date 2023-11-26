@@ -47,6 +47,18 @@ def main() -> None:
         default=8,
         help="Number of GGN samples per GGN iteration. Equivalent to the batch size per forward pass in GGN computation.",
     )
+    parser.add_argument(
+        "--norm-saving",
+        type=str,
+        default="disabled",
+        help="GGN norm saving: disabled (default), total, next.",
+    )
+    parser.add_argument(
+        "--ggn-saving",
+        type=str,
+        default="dense",
+        help="GGN saving: disabled, dense (default).",
+    )
     parser.add_argument("--rng-seed", type=int, default=7, help="RNG seed.")
     parser.add_argument("--data-path", type=str, default="../data/", help="Data path.")
     parser.add_argument("--results-path", type=str, default="../results/", help="Results path.")
@@ -61,6 +73,10 @@ def main() -> None:
     )
     args = parser.parse_args()
     prng_key = jax.random.key(args.rng_seed)
+
+    assert not (
+        args.norm_saving == "disabled" and args.ggn_saving == "disabled"
+    ), "No results are stored in this configutation!"
 
     # Load data
     train_dataset = get_dataset(args.dataset, train=True, px=args.px, path=args.data_path)
@@ -101,6 +117,8 @@ def main() -> None:
             args.ggn_freq,
             n_ggn_iterations,
             n_steps,
+            args.norm_saving,
+            args.ggn_saving,
             args.no_progress_bar,
             args.results_path,
         )
