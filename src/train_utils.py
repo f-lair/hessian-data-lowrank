@@ -158,9 +158,11 @@ def test_step(
 
 
 @jax.jit
-def compute_ggn(state: TrainState, batch: Tuple[jax.Array, jax.Array]) -> jax.Array:
+def compute_ggn_decomp(
+    state: TrainState, batch: Tuple[jax.Array, jax.Array]
+) -> Tuple[jax.Array, jax.Array]:
     """
-    Performs a single training step with GGN computation.
+    Performs a single training step with decomposed GGN computation.
     C: Model output dim.
     D: Parameter dim.
     N: Batch dim.
@@ -170,7 +172,9 @@ def compute_ggn(state: TrainState, batch: Tuple[jax.Array, jax.Array]) -> jax.Ar
         batch (Tuple[jax.Array, jax.Array]): Batched input data.
 
     Returns:
-        jax.Array: Per-item GGN ([N, D, D]).
+        Tuple[jax.Array, jax.Array]:
+            Per-item J_model ([N, C, D]),
+            per-item H_loss ([N, C, C]).
     """
 
     def model_fn(params: FrozenDict[str, Any], x: jax.Array) -> jax.Array:
@@ -229,6 +233,11 @@ def compute_ggn(state: TrainState, batch: Tuple[jax.Array, jax.Array]) -> jax.Ar
         [x.reshape(N, C, -1) for x in tree_util.tree_leaves(J_model)], axis=2
     )  # [N, C, D]
 
+    return J_model, H_loss
+
+
+@partial(jax.jit, device=jax.devices("cpu")[0])  # type: ignore
+def compute_ggn(J_model: jax.Array, H_loss: jax.Array) -> jax.Array:
     # Compute per-item Generalized Gauss-Newton (GGN) matrix: J_model.T @ H_loss @ J_model
     GGN = jnp.einsum("nax,nab,nby->nxy", J_model, H_loss, J_model)  # [N, D, D]
 
@@ -309,7 +318,10 @@ def train_epoch(
                     tqdm(ggn_dataloader, desc="GGN-sample-step", disable=no_progress_bar)
                 ):
                     # Compute batch GGNs
-                    GGN = compute_ggn(state, ggn_batch)  # [N, D, D]
+                    J_model, H_loss = compute_ggn_decomp(state, ggn_batch)  # [N, C, D], [N, C, C]
+                    J_model = jax.device_put(J_model, jax.devices('cpu')[0])
+                    H_loss = jax.device_put(H_loss, jax.devices('cpu')[0])
+                    GGN = compute_ggn(J_model, H_loss)
 
                     # Aggregate GGN samples as running average to save memory
                     aggregated_batch_size = ggn_step_idx + 1

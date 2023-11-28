@@ -88,10 +88,11 @@ def load_ggn(
     results_path: str,
     batch_size: int | None = None,
 ) -> jax.Array:
-    if batch_size is None:
-        return jnp.load(str(Path(results_path, f"GGN_total_{step_idx}.npy")))
-    else:
-        return jnp.load(str(Path(results_path, f"GGN_{batch_size}_batched_{step_idx}.npy")))
+    with jax.default_device(jax.devices("cpu")[0]):
+        if batch_size is None:
+            return jnp.load(str(Path(results_path, f"GGN_total_{step_idx}.npy")))
+        else:
+            return jnp.load(str(Path(results_path, f"GGN_{batch_size}_batched_{step_idx}.npy")))
 
 
 def remove_ggn(
