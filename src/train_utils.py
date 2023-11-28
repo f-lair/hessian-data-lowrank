@@ -9,8 +9,9 @@ from jax import numpy as jnp
 from jax import tree_util
 from tqdm import tqdm
 
-from data_utils import DataLoader
+from data_loader import DataLoader
 from log_utils import load_ggn, remove_ggn, save_ggn, save_norm
+from sampler import LossSampler
 
 
 def train_step(
@@ -298,6 +299,10 @@ def train_epoch(
                 GGN_counter = 0  # Number of already computed per-item GGNs (for running average)
                 GGN_total = None  # Total GGN, encompassing all per-item GGNs across the dataset
                 GGN_samples = None  # GGN samples, aggregated over one/multiple data batches
+
+                # Update loss values, if LossSampler is used
+                if isinstance(ggn_dataloader.sampler, LossSampler):
+                    ggn_dataloader.sampler.update(state)
 
                 # Iterate over dataset for GGN computation
                 for ggn_step_idx, ggn_batch in enumerate(

@@ -1,13 +1,13 @@
-from typing import Any, List
+from typing import Callable
 
-import jax
 import numpy as np
 import torch
-from jax.tree_util import tree_map
 from torch import Tensor
 from torch.utils import data
 from torchvision.datasets import MNIST
 from torchvision.transforms.v2.functional import resize
+
+from sampler import LossSampler
 
 
 def get_dataset(dataset: str, train: bool, px: int, path: str) -> data.Dataset:
@@ -33,7 +33,9 @@ def get_dataset(dataset: str, train: bool, px: int, path: str) -> data.Dataset:
         raise ValueError(f"Unsupported dataset: {dataset}")
 
 
-def get_sampler(sampling: str, dataset: data.Dataset, rng_seed: int) -> data.Sampler:
+def get_sampler(
+    sampling: str, dataset: data.Dataset, rng_seed: int, step_fn: Callable, batch_size: int
+) -> data.Sampler:
     """
     Returns data sampler specified by CLI arguments.
 
@@ -41,6 +43,8 @@ def get_sampler(sampling: str, dataset: data.Dataset, rng_seed: int) -> data.Sam
         sampling (str): Sampling method.
         dataset (data.Dataset): Dataset.
         rng_seed (int): RNG seed.
+        step_fn (Callable): Step function taking a train state and data batch and yielding the loss.
+        batch_size (int): Batch size used for loss computations.
 
     Raises:
         ValueError: Unsupported sampling method.
@@ -53,45 +57,44 @@ def get_sampler(sampling: str, dataset: data.Dataset, rng_seed: int) -> data.Sam
 
     if sampling == "uniform":
         return data.RandomSampler(dataset, generator=rng)  # type: ignore
+    elif sampling == "loss":
+        return LossSampler(
+            dataset,
+            rng,
+            step_fn,
+            batch_size,
+            inverse=False,
+            replacement=False,
+        )
+    elif sampling == "loss-inv":
+        return LossSampler(
+            dataset,
+            rng,
+            step_fn,
+            batch_size,
+            inverse=True,
+            replacement=False,
+        )
+    elif sampling == "loss-rep":
+        return LossSampler(
+            dataset,
+            rng,
+            step_fn,
+            batch_size,
+            inverse=False,
+            replacement=True,
+        )
+    elif sampling == "loss-inv-rep":
+        return LossSampler(
+            dataset,
+            rng,
+            step_fn,
+            batch_size,
+            inverse=True,
+            replacement=True,
+        )
     else:
         raise ValueError(f"Unsupported sampling: {sampling}")
-
-
-class DataLoader(data.DataLoader):
-    """PyTorch data loader with jax-compatible collate function."""
-
-    def __init__(self, dataset: data.Dataset, batch_size: int, sampler: data.Sampler):
-        """
-        Initializes data loader.
-
-        Args:
-            dataset (data.Dataset): Dataset.
-            batch_size (int): Batch size.
-            sampler (data.Sampler): Data sampler.
-        """
-
-        super().__init__(
-            dataset,
-            batch_size=batch_size,
-            num_workers=0,
-            collate_fn=self.collate_fn,
-            sampler=sampler,
-        )
-
-    @staticmethod
-    def collate_fn(batch: List[Any]) -> jax.Array:
-        """
-        Collate function, mapping a list of PyTorch batch items to a numpy array.
-        cf. https://jax.readthedocs.io/en/latest/notebooks/Neural_Network_and_Data_Loading.html#data-loading-with-pytorch
-
-        Args:
-            batch (List[Any]): List of PyTorch batch items.
-
-        Returns:
-            jax.Array: Array with batch items stacked along a new dimension.
-        """
-
-        return tree_map(np.asarray, data.default_collate(batch))
 
 
 class MNISTTransform:

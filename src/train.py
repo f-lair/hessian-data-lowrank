@@ -5,10 +5,11 @@ import optax
 from flax.training.train_state import TrainState
 from tqdm import trange
 
-from data_utils import DataLoader, get_dataset, get_sampler
+from data_loader import DataLoader
+from data_utils import get_dataset, get_sampler
 from log_utils import save_train_log
 from model import get_model
-from train_utils import test_epoch, train_epoch
+from train_utils import test_epoch, test_step, train_epoch
 
 
 def main() -> None:
@@ -39,7 +40,7 @@ def main() -> None:
         "--ggn-sampling",
         type=str,
         default="uniform",
-        help="Sampling method for GGN computation: uniform (default).",
+        help="Sampling method for GGN computation: uniform (default), loss, loss-inv, loss-rep, loss-inv-rep.",
     )
     parser.add_argument(
         "--ggn-samples",
@@ -81,9 +82,27 @@ def main() -> None:
     # Load data
     train_dataset = get_dataset(args.dataset, train=True, px=args.px, path=args.data_path)
     test_dataset = get_dataset(args.dataset, train=False, px=args.px, path=args.data_path)
-    train_sampler = get_sampler("uniform", train_dataset, args.rng_seed)
-    test_sampler = get_sampler("uniform", test_dataset, args.rng_seed)
-    ggn_sampler = get_sampler(args.ggn_sampling, train_dataset, args.rng_seed + 1)
+    train_sampler = get_sampler(
+        "uniform",
+        train_dataset,
+        args.rng_seed,
+        test_step,
+        args.train_batch_size,
+    )
+    test_sampler = get_sampler(
+        "uniform",
+        test_dataset,
+        args.rng_seed,
+        test_step,
+        args.train_batch_size,
+    )
+    ggn_sampler = get_sampler(
+        args.ggn_sampling,
+        train_dataset,
+        args.rng_seed + 1,
+        test_step,
+        args.train_batch_size,
+    )
     train_dataloader = DataLoader(train_dataset, args.train_batch_size, train_sampler)
     test_dataloader = DataLoader(test_dataset, args.train_batch_size, test_sampler)
     ggn_dataloader = DataLoader(train_dataset, args.ggn_samples, ggn_sampler)
