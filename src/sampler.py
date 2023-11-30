@@ -63,10 +63,10 @@ class LossSampler(data.Sampler[int]):
             loss, _, _ = self.step_fn(state, batch)
             self.loss_weights[indices] = torch.from_numpy(np.array(loss))
 
+        self.loss_weights += 1e-8
+
         if self.inverse:
             self.loss_weights = 1.0 / self.loss_weights
-
-        self.loss_weights += 1e-8
 
     def __len__(self) -> int:
         """
