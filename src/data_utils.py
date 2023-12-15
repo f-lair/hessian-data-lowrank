@@ -7,7 +7,7 @@ from torch.utils import data
 from torchvision.datasets import MNIST
 from torchvision.transforms.v2.functional import resize
 
-from sampler import LossSampler
+from sampler import GradnormSampler, LossSampler
 
 
 def get_dataset(dataset: str, train: bool, px: int, path: str) -> data.Dataset:
@@ -34,7 +34,12 @@ def get_dataset(dataset: str, train: bool, px: int, path: str) -> data.Dataset:
 
 
 def get_sampler(
-    sampling: str, dataset: data.Dataset, rng_seed: int, step_fn: Callable, batch_size: int
+    sampling: str,
+    dataset: data.Dataset,
+    rng_seed: int,
+    train_step_fn: Callable,
+    test_step_fn: Callable,
+    batch_size: int,
 ) -> data.Sampler:
     """
     Returns data sampler specified by CLI arguments.
@@ -43,7 +48,8 @@ def get_sampler(
         sampling (str): Sampling method.
         dataset (data.Dataset): Dataset.
         rng_seed (int): RNG seed.
-        step_fn (Callable): Step function taking a train state and data batch and yielding the loss.
+        train_step_fn (Callable): Step function taking a train state and data batch and yielding the gradient.
+        test_step_fn (Callable): Step function taking a train state and data batch and yielding the loss.
         batch_size (int): Batch size used for loss computations.
 
     Raises:
@@ -61,7 +67,7 @@ def get_sampler(
         return LossSampler(
             dataset,
             rng,
-            step_fn,
+            test_step_fn,
             batch_size,
             inverse=False,
             replacement=False,
@@ -70,7 +76,7 @@ def get_sampler(
         return LossSampler(
             dataset,
             rng,
-            step_fn,
+            test_step_fn,
             batch_size,
             inverse=True,
             replacement=False,
@@ -79,7 +85,7 @@ def get_sampler(
         return LossSampler(
             dataset,
             rng,
-            step_fn,
+            test_step_fn,
             batch_size,
             inverse=False,
             replacement=True,
@@ -88,7 +94,43 @@ def get_sampler(
         return LossSampler(
             dataset,
             rng,
-            step_fn,
+            test_step_fn,
+            batch_size,
+            inverse=True,
+            replacement=True,
+        )
+    elif sampling == "gradnorm":
+        return GradnormSampler(
+            dataset,
+            rng,
+            train_step_fn,
+            batch_size,
+            inverse=False,
+            replacement=False,
+        )
+    elif sampling == "gradnorm-inv":
+        return GradnormSampler(
+            dataset,
+            rng,
+            train_step_fn,
+            batch_size,
+            inverse=True,
+            replacement=False,
+        )
+    elif sampling == "gradnorm-rep":
+        return GradnormSampler(
+            dataset,
+            rng,
+            train_step_fn,
+            batch_size,
+            inverse=False,
+            replacement=True,
+        )
+    elif sampling == "gradnorm-inv-rep":
+        return GradnormSampler(
+            dataset,
+            rng,
+            train_step_fn,
             batch_size,
             inverse=True,
             replacement=True,

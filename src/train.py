@@ -9,7 +9,7 @@ from data_loader import DataLoader
 from data_utils import get_dataset, get_sampler
 from log_utils import save_train_log
 from model import get_model
-from train_utils import test_epoch, test_step, train_epoch
+from train_utils import test_epoch, test_step, train_epoch, train_step
 
 
 def main() -> None:
@@ -40,7 +40,7 @@ def main() -> None:
         "--ggn-sampling",
         type=str,
         default="uniform",
-        help="Sampling method for GGN computation: uniform (default), loss, loss-inv, loss-rep, loss-inv-rep.",
+        help="Sampling method for GGN computation: uniform (default), loss, loss-inv, loss-rep, loss-inv-rep, gradnorm, gradnorm-inv, gradnorm-rep, gradnorm-inv-rep.",
     )
     parser.add_argument(
         "--ggn-samples",
@@ -52,7 +52,7 @@ def main() -> None:
         "--norm-saving",
         type=str,
         default="disabled",
-        help="GGN norm saving: disabled (default), total, next.",
+        help="GGN norm saving: disabled (default), total, next, last.",
     )
     parser.add_argument(
         "--ggn-saving",
@@ -86,6 +86,7 @@ def main() -> None:
         "uniform",
         train_dataset,
         args.rng_seed,
+        train_step,
         test_step,
         args.train_batch_size,
     )
@@ -93,6 +94,7 @@ def main() -> None:
         "uniform",
         test_dataset,
         args.rng_seed,
+        train_step,
         test_step,
         args.train_batch_size,
     )
@@ -100,6 +102,7 @@ def main() -> None:
         args.ggn_sampling,
         train_dataset,
         args.rng_seed + 1,
+        train_step,
         test_step,
         args.train_batch_size,
     )

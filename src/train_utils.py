@@ -1,4 +1,5 @@
 from functools import partial
+from pathlib import Path
 from typing import Any, List, Tuple
 
 import jax
@@ -18,7 +19,11 @@ def train_step(
     state: TrainState,
     batch: Tuple[jax.Array, jax.Array],
     n_classes: int,
-) -> Tuple[TrainState, jax.Array, jax.Array, jax.Array]:
+    return_grad: bool = False,
+) -> (
+    Tuple[TrainState, jax.Array, jax.Array, jax.Array]
+    | Tuple[TrainState, jax.Array, jax.Array, jax.Array, jax.Array]
+):
     """
     Performs a single training step without GGN computation.
     C: Model output dim.
@@ -29,11 +34,13 @@ def train_step(
         state (TrainState): Current training state.
         batch (Tuple[jax.Array, jax.Array]): Batched input data.
         n_classes (int): Number of classes (equal to C).
+        return_grad (bool, optional): Whether gradients should be returned. Defaults to False.
 
     Returns:
         Tuple[TrainState, jax.Array, jax.Array, jax.Array]:
             Updated training state,
             per-item loss ([N]),
+            per-item gradient ([N, D], optional),
             number of correct predictions per class ([C]),
             number of ground-truth items per class ([C]).
     """
@@ -84,7 +91,15 @@ def train_step(
     # Perform gradient step, update training state
     state = state.apply_gradients(grads=d_loss)
 
-    return state, loss, n_correct_per_class, n_per_class
+    if return_grad:
+        N, _ = logits.shape
+        # Transform 'd_loss' from pytree representation into vector representation
+        d_loss = jnp.concatenate(
+            [x.reshape(N, -1) for x in tree_util.tree_leaves(d_loss)], axis=1
+        )  # [N, D]
+        return state, loss, d_loss, n_correct_per_class, n_per_class
+    else:
+        return state, loss, n_correct_per_class, n_per_class
 
 
 def test_step(
@@ -268,8 +283,8 @@ def train_epoch(
         ggn_freq (int): Frequency of GGN iterations.
         n_ggn_iterations (int): Number of GGN iterations.
         n_steps (int): Current number of completed training step across epochs.
-        norm_saving (str): GGN norm saving: disabled, total, next.
-        ggn_saving (str): GGN saving: disabled, decomposed, dense.
+        norm_saving (str): GGN norm saving: disabled, total, next, last.
+        ggn_saving (str): GGN saving: disabled, dense.
         no_progress_bar (bool): Disables progress bar.
         results_path (str): Results path.
 
@@ -313,10 +328,29 @@ def train_epoch(
                 if isinstance(ggn_dataloader.sampler, LossSampler):
                     ggn_dataloader.sampler.update(state)
 
+                datapoints = []
+
                 # Iterate over dataset for GGN computation
                 for ggn_step_idx, ggn_batch in enumerate(
                     tqdm(ggn_dataloader, desc="GGN-sample-step", disable=no_progress_bar)
                 ):
+                    # CODE TO SAVE FIRST N DATA POINTS
+                    # if ggn_step_idx < ggn_batch_sizes[-1]:
+                    #     x, _ = ggn_batch
+
+                    #     datapoints.append(x)
+                    # elif ggn_step_idx == ggn_batch_sizes[-1]:
+                    #     jnp.save(
+                    #         str(
+                    #             Path(
+                    #                 results_path,
+                    #                 "datapoints",
+                    #                 f"uniform_{n_ggn_iterations - GGN_iter_counter + 1}.npy",
+                    #             )
+                    #         ),
+                    #         jnp.stack(datapoints),
+                    #     )
+
                     # Compute batch GGNs
                     J_model, H_loss = compute_ggn_decomp(state, ggn_batch)  # [N, C, D], [N, C, C]
                     J_model = jax.device_put(J_model, jax.devices('cpu')[0])
@@ -333,7 +367,7 @@ def train_epoch(
                         )  # [N, D, D]
 
                     # Save GGN samples on disk, if needed aggregated batch size reached
-                    try:
+                    if aggregated_batch_size in ggn_batch_sizes:
                         ggn_batch_size_idx = ggn_batch_sizes.index(aggregated_batch_size)
                         if ggn_batch_size_idx > 0:
                             prev_ggn_batch_size = ggn_batch_sizes[ggn_batch_size_idx - 1]
@@ -349,8 +383,8 @@ def train_epoch(
                                     results_path,
                                     batch_size=prev_ggn_batch_size,
                                 )
-                            # GGN-saving "disabled" and not norm-saving "total": Remove previous batched GGN samples
-                            if ggn_saving == "disabled" and norm_saving != "total":
+                            # GGN-saving "disabled" and not norm-saving "total" or "last": Remove previous batched GGN samples
+                            if ggn_saving == "disabled" and norm_saving not in {"total", "last"}:
                                 remove_ggn(n_steps, results_path, batch_size=prev_ggn_batch_size)
 
                         # Not norm-saving "next" or not ggn-saving "disabled" or not last GGN samples: Save GGN samples
@@ -366,18 +400,14 @@ def train_epoch(
                                 batch_size=aggregated_batch_size,
                             )
 
-                        # Norm-saving "next" and last GGN samples: Stop further GGN computations
-                        if norm_saving == "next" and ggn_batch_size_idx + 1 == len(
+                        # Norm-saving "next" or "last" and last GGN samples: Stop further GGN computations
+                        if norm_saving in {"next", "last"} and ggn_batch_size_idx + 1 == len(
                             ggn_batch_sizes
                         ):
                             break
 
-                    except ValueError:
-                        # Only caught, if aggr. batch size not found in list of batch sizes -> no-op
-                        pass
-
-                    # Not GGN-saving "next": Compute total GGN as running average to save memory
-                    if ggn_saving != "next":
+                    # Norm-saving "disabled" or "total": Compute total GGN as running average to save memory
+                    if norm_saving in {"disabled", "total"}:
                         GGN_counter += GGN.shape[0]
                         if GGN_total is None:
                             GGN_total = jnp.mean(GGN, axis=0)  # [D, D]
@@ -387,8 +417,8 @@ def train_epoch(
                                 + jnp.sum(GGN - GGN_total[None, :, :], axis=0) / GGN_counter
                             )  # [D, D]
 
-                # GGN-saving "dense" and not Norm-saving "next": Save total GGN on disk
-                if ggn_saving == "dense" and norm_saving != "next":
+                # GGN-saving "dense" and not Norm-saving "disabled" or "total": Save total GGN on disk
+                if ggn_saving == "dense" and norm_saving in {"disabled", "total"}:
                     save_ggn(GGN_total, n_steps, results_path)  # type: ignore
 
                 # Norm-saving "total": Compute norm
@@ -405,6 +435,25 @@ def train_epoch(
                         # GGN-saving "disabled" : Remove batched GGN samples
                         if ggn_saving == "disabled":
                             remove_ggn(n_steps, results_path, batch_size=ggn_batch_size)
+                # Norm-saving "last": Compute norm
+                elif norm_saving == "last":
+                    GGN_samples_last = load_ggn(
+                        n_steps, results_path, batch_size=ggn_batch_sizes[-1]
+                    )
+                    for ggn_batch_size in ggn_batch_sizes[:-1]:
+                        GGN_samples = load_ggn(n_steps, results_path, batch_size=ggn_batch_size)
+                        save_norm(
+                            GGN_samples,
+                            GGN_samples_last,
+                            n_steps,
+                            results_path,
+                            batch_size=ggn_batch_size,
+                        )
+                        # GGN-saving "disabled" : Remove batched GGN samples
+                        if ggn_saving == "disabled":
+                            remove_ggn(n_steps, results_path, batch_size=ggn_batch_size)
+                    if ggn_saving == "disabled":
+                        remove_ggn(n_steps, results_path, batch_size=ggn_batch_sizes[-1])
 
             # Perform training step
             state, loss, n_correct_per_class, n_per_class = train_step_jit(
