@@ -32,7 +32,8 @@ def save_norm(
     else:
         raise ValueError(f"Unsupported GGN dimensionalities: {GGN_1.shape}, {GGN_2.shape}")
 
-    f_norm = jnp.linalg.norm(GGN_1 - GGN_2, ord="fro", axis=(-2, -1))
+    with jax.default_device(jax.devices("cpu")[0]):
+        f_norm = jnp.linalg.norm(GGN_1 - GGN_2, ord="fro", axis=(-2, -1))
     jnp.save(
         str(Path(results_path, f"f_norm_{batch_size}_batched_{step_idx}.npy")),
         f_norm,
