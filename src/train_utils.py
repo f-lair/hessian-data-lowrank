@@ -353,18 +353,18 @@ def train_epoch(
                     #     )
 
                     # Compute batch GGNs
-                    t1 = time()
+                    # t1 = time()
                     J_model, H_loss = compute_ggn_decomp(state, ggn_batch)  # [N, C, D], [N, C, C]
-                    t2 = time()
+                    # t2 = time()
                     J_model = jax.device_put(J_model, jax.devices('cpu')[0])
                     H_loss = jax.device_put(H_loss, jax.devices('cpu')[0])
-                    t3 = time()
+                    # t3 = time()
                     GGN = compute_ggn(J_model, H_loss)
-                    t4 = time()
-                    print("compute_ggn_decomp:", t2 - t1)
-                    print("jax.device_put:", t3 - t2)
-                    print("compute_ggn:", t4 - t3)
-                    print("----------")
+                    # t4 = time()
+                    # print("compute_ggn_decomp:", t2 - t1)
+                    # print("jax.device_put:", t3 - t2)
+                    # print("compute_ggn:", t4 - t3)
+                    # print("----------")
 
                     # Aggregate GGN samples as running average to save memory
                     aggregated_batch_size = ggn_step_idx + 1
