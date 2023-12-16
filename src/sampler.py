@@ -128,8 +128,7 @@ class GradnormSampler(data.Sampler[int]):
 
         self.data_source = data_source
         self.rng = rng
-        # self.step_fn = jax.jit(partial(step_fn, n_classes=len(data_source.classes), return_grad=True))  # type: ignore
-        self.step_fn = partial(step_fn, n_classes=len(data_source.classes), return_grad=True)  # type: ignore
+        self.step_fn = jax.jit(partial(step_fn, n_classes=len(data_source.classes), return_grad=True))  # type: ignore
         self.batch_size = batch_size
         self.inverse = inverse
         self.replacement = replacement
@@ -164,7 +163,7 @@ class GradnormSampler(data.Sampler[int]):
         if self.inverse:
             self.gradnorm_weights = 1.0 / self.gradnorm_weights
 
-        torch.save(self.gradnorm_weights, "../results/distr/gradnorm_inv_distr.pth")
+        # torch.save(self.gradnorm_weights, "../results/distr/gradnorm_inv_distr.pth")
 
     def __len__(self) -> int:
         """
