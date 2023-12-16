@@ -8,6 +8,7 @@ import torch
 from flax.training.train_state import TrainState
 from torch import Generator
 from torch.utils import data
+from tqdm import tqdm
 
 from data_loader import DataLoader
 
@@ -23,6 +24,7 @@ class LossSampler(data.Sampler[int]):
         batch_size: int,
         inverse: bool,
         replacement: bool,
+        no_progress_bar: bool,
     ) -> None:
         """
         Initializes data sampler.
@@ -34,6 +36,7 @@ class LossSampler(data.Sampler[int]):
             batch_size (int): Batch size for loss computations.
             inverse (bool): If set, samples data items with lowest loss with highest probability.
             replacement (bool): If set, samples with replacement.
+            no_progress_bar (bool): Disables progress bar.
         """
 
         self.data_source = data_source
@@ -42,6 +45,7 @@ class LossSampler(data.Sampler[int]):
         self.batch_size = batch_size
         self.inverse = inverse
         self.replacement = replacement
+        self.no_progress_bar = no_progress_bar
 
         self.data_len = len(self.data_source)  # type: ignore
         self.loss_weights = torch.ones((self.data_len,))
@@ -58,7 +62,9 @@ class LossSampler(data.Sampler[int]):
             state (TrainState): Current training state.
         """
 
-        for indices in self.batch_indices:
+        for indices in tqdm(
+            self.batch_indices, desc="Sampler Update", disable=self.no_progress_bar
+        ):
             batch = DataLoader.collate_fn([self.data_source[idx] for idx in indices])
             loss, _, _ = self.step_fn(state, batch)
             self.loss_weights[indices] = torch.from_numpy(np.array(loss))
@@ -105,6 +111,7 @@ class GradnormSampler(data.Sampler[int]):
         batch_size: int,
         inverse: bool,
         replacement: bool,
+        no_progress_bar: bool,
     ) -> None:
         """
         Initializes data sampler.
@@ -116,14 +123,17 @@ class GradnormSampler(data.Sampler[int]):
             batch_size (int): Batch size for gradient computations.
             inverse (bool): If set, samples data items with lowest gradient-norm with highest probability.
             replacement (bool): If set, samples with replacement.
+            no_progress_bar (bool): Disables progress bar.
         """
 
         self.data_source = data_source
         self.rng = rng
-        self.step_fn = jax.jit(partial(step_fn, n_classes=len(data_source.classes), return_grad=True))  # type: ignore
+        # self.step_fn = jax.jit(partial(step_fn, n_classes=len(data_source.classes), return_grad=True))  # type: ignore
+        self.step_fn = partial(step_fn, n_classes=len(data_source.classes), return_grad=True)  # type: ignore
         self.batch_size = batch_size
         self.inverse = inverse
         self.replacement = replacement
+        self.no_progress_bar = no_progress_bar
 
         self.data_len = len(self.data_source)  # type: ignore
         self.gradnorm_weights = torch.ones((self.data_len,))
@@ -140,9 +150,11 @@ class GradnormSampler(data.Sampler[int]):
             state (TrainState): Current training state.
         """
 
-        for indices in self.batch_indices:
+        for indices in tqdm(
+            self.batch_indices, desc="Sampler Update", disable=self.no_progress_bar
+        ):
             batch = DataLoader.collate_fn([self.data_source[idx] for idx in indices])
-            _, _, d_loss, _, _ = self.step_fn(state, batch)
+            _, d_loss, _, _ = self.step_fn(state, batch)
             self.gradnorm_weights[indices] = torch.from_numpy(
                 np.linalg.norm(np.array(d_loss), ord=2, axis=1)
             )
@@ -152,7 +164,7 @@ class GradnormSampler(data.Sampler[int]):
         if self.inverse:
             self.gradnorm_weights = 1.0 / self.gradnorm_weights
 
-        # torch.save(self.gradnorm_weights, "../results/distr/gradnorm_inv_distr.pth")
+        torch.save(self.gradnorm_weights, "../results/distr/gradnorm_inv_distr.pth")
 
     def __len__(self) -> int:
         """

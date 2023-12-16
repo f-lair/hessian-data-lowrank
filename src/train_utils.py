@@ -13,18 +13,14 @@ from tqdm import tqdm
 
 from data_loader import DataLoader
 from log_utils import load_ggn, remove_ggn, save_ggn, save_norm
-from sampler import LossSampler
+from sampler import GradnormSampler, LossSampler
 
 
 def train_step(
     state: TrainState,
     batch: Tuple[jax.Array, jax.Array],
     n_classes: int,
-    return_grad: bool = False,
-) -> (
-    Tuple[TrainState, jax.Array, jax.Array, jax.Array]
-    | Tuple[TrainState, jax.Array, jax.Array, jax.Array, jax.Array]
-):
+) -> Tuple[TrainState, jax.Array, jax.Array, jax.Array]:
     """
     Performs a single training step without GGN computation.
     C: Model output dim.
@@ -35,13 +31,11 @@ def train_step(
         state (TrainState): Current training state.
         batch (Tuple[jax.Array, jax.Array]): Batched input data.
         n_classes (int): Number of classes (equal to C).
-        return_grad (bool, optional): Whether gradients should be returned. Defaults to False.
 
     Returns:
         Tuple[TrainState, jax.Array, jax.Array, jax.Array]:
             Updated training state,
             per-item loss ([N]),
-            per-item gradient ([N, D], optional),
             number of correct predictions per class ([C]),
             number of ground-truth items per class ([C]).
     """
@@ -92,15 +86,7 @@ def train_step(
     # Perform gradient step, update training state
     state = state.apply_gradients(grads=d_loss)
 
-    if return_grad:
-        N, _ = logits.shape
-        # Transform 'd_loss' from pytree representation into vector representation
-        d_loss = jnp.concatenate(
-            [x.reshape(N, -1) for x in tree_util.tree_leaves(d_loss)], axis=1
-        )  # [N, D]
-        return state, loss, d_loss, n_correct_per_class, n_per_class
-    else:
-        return state, loss, n_correct_per_class, n_per_class
+    return state, loss, n_correct_per_class, n_per_class
 
 
 def test_step(
@@ -110,7 +96,8 @@ def test_step(
         jax.Array,
     ],
     n_classes: int,
-) -> Tuple[jax.Array, jax.Array, jax.Array]:
+    return_grad: bool = False,
+) -> Tuple[jax.Array, jax.Array, jax.Array] | Tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
     Performs a single test step without GGN computation.
     C: Model output dim.
@@ -125,13 +112,14 @@ def test_step(
     Returns:
         Tuple[jax.Array, jax.Array, jax.Array]:
             Per-item loss ([N]),
+            per-item gradient ([N, D], optional),
             number of correct predictions per class ([C]),
             number of ground-truth items per class ([C]).
     """
 
     def model_loss_fn(
         params: FrozenDict[str, Any], x: jax.Array, y: jax.Array
-    ) -> Tuple[jax.Array, Tuple[jax.Array, jax.Array]]:
+    ) -> Tuple[jax.Array, Tuple[jax.Array]]:
         """
         Performs model forward pass and evaluates mean loss as a function of model parameters.
 
@@ -141,22 +129,20 @@ def test_step(
             y (jax.Array): Ground truth, integer-encoded ([N]).
 
         Returns:
-            Tuple[jax.Array, Tuple[jax.Array, jax.Array]]:
-                Mean loss ([1]),
-                per-item loss ([N]),
+            Tuple[jax.Array, Tuple[jax.Array]]:
+                Per-item loss ([N]),
                 model output ([N, C]).
         """
 
         logits = state.apply_fn(params, x)  # [N, C]
         loss_unreduced = optax.softmax_cross_entropy_with_integer_labels(logits, y)  # [N]
-        loss = jnp.mean(loss_unreduced)  # [1]
-        return loss, (loss_unreduced, logits)  # type: ignore
+        return loss_unreduced, (logits,)  # type: ignore
 
     # Retrieve data
     x, y = batch
 
     # Forward pass
-    _, (loss, logits) = model_loss_fn(state.params, x, y)  # [N]; [N, C]
+    loss, (logits,) = model_loss_fn(state.params, x, y)  # [N]; [N, C]
 
     # Compute number of correct predictions per class
     correct = (jnp.argmax(logits, -1) == y).astype(int)  # [N]
@@ -170,7 +156,19 @@ def test_step(
         length=n_classes,
     )  # [C]
 
-    return loss, n_correct_per_class, n_per_class
+    if return_grad:
+        d_loss, _ = jax.jacrev(model_loss_fn, has_aux=True)(
+            state.params, x, y
+        )  # [N, D], pytree in D
+        N, _ = logits.shape
+
+        # Transform 'd_loss' from pytree representation into vector representation
+        d_loss = jnp.concatenate(
+            [x.reshape(N, -1) for x in tree_util.tree_leaves(d_loss)], axis=1
+        )  # [N, D]
+        return loss, d_loss, n_correct_per_class, n_per_class
+    else:
+        return loss, n_correct_per_class, n_per_class
 
 
 @jax.jit
@@ -326,7 +324,9 @@ def train_epoch(
                 GGN_samples = None  # GGN samples, aggregated over one/multiple data batches
 
                 # Update loss values, if LossSampler is used
-                if isinstance(ggn_dataloader.sampler, LossSampler):
+                if isinstance(ggn_dataloader.sampler, LossSampler) or isinstance(
+                    ggn_dataloader.sampler, GradnormSampler
+                ):
                     ggn_dataloader.sampler.update(state)
 
                 datapoints = []

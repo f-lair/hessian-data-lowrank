@@ -37,9 +37,9 @@ def get_sampler(
     sampling: str,
     dataset: data.Dataset,
     rng_seed: int,
-    train_step_fn: Callable,
     test_step_fn: Callable,
     batch_size: int,
+    no_progress_bar: bool,
 ) -> data.Sampler:
     """
     Returns data sampler specified by CLI arguments.
@@ -48,9 +48,9 @@ def get_sampler(
         sampling (str): Sampling method.
         dataset (data.Dataset): Dataset.
         rng_seed (int): RNG seed.
-        train_step_fn (Callable): Step function taking a train state and data batch and yielding the gradient.
         test_step_fn (Callable): Step function taking a train state and data batch and yielding the loss.
         batch_size (int): Batch size used for loss computations.
+        no_progress_bar (bool): Disables progress bar.
 
     Raises:
         ValueError: Unsupported sampling method.
@@ -71,6 +71,7 @@ def get_sampler(
             batch_size,
             inverse=False,
             replacement=False,
+            no_progress_bar=no_progress_bar,
         )
     elif sampling == "loss-inv":
         return LossSampler(
@@ -80,6 +81,7 @@ def get_sampler(
             batch_size,
             inverse=True,
             replacement=False,
+            no_progress_bar=no_progress_bar,
         )
     elif sampling == "loss-rep":
         return LossSampler(
@@ -89,6 +91,7 @@ def get_sampler(
             batch_size,
             inverse=False,
             replacement=True,
+            no_progress_bar=no_progress_bar,
         )
     elif sampling == "loss-inv-rep":
         return LossSampler(
@@ -98,42 +101,47 @@ def get_sampler(
             batch_size,
             inverse=True,
             replacement=True,
+            no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm":
         return GradnormSampler(
             dataset,
             rng,
-            train_step_fn,
+            test_step_fn,
             batch_size,
             inverse=False,
             replacement=False,
+            no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm-inv":
         return GradnormSampler(
             dataset,
             rng,
-            train_step_fn,
+            test_step_fn,
             batch_size,
             inverse=True,
             replacement=False,
+            no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm-rep":
         return GradnormSampler(
             dataset,
             rng,
-            train_step_fn,
+            test_step_fn,
             batch_size,
             inverse=False,
             replacement=True,
+            no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm-inv-rep":
         return GradnormSampler(
             dataset,
             rng,
-            train_step_fn,
+            test_step_fn,
             batch_size,
             inverse=True,
             replacement=True,
+            no_progress_bar=no_progress_bar,
         )
     else:
         raise ValueError(f"Unsupported sampling: {sampling}")

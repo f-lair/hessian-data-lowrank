@@ -86,25 +86,25 @@ def main() -> None:
         "uniform",
         train_dataset,
         args.rng_seed,
-        train_step,
         test_step,
         args.train_batch_size,
+        args.no_progress_bar,
     )
     test_sampler = get_sampler(
         "uniform",
         test_dataset,
         args.rng_seed,
-        train_step,
         test_step,
         args.train_batch_size,
+        args.no_progress_bar,
     )
     ggn_sampler = get_sampler(
         args.ggn_sampling,
         train_dataset,
         args.rng_seed + 1,
-        train_step,
         test_step,
         args.train_batch_size,
+        args.no_progress_bar,
     )
     train_dataloader = DataLoader(train_dataset, args.train_batch_size, train_sampler)
     test_dataloader = DataLoader(test_dataset, args.train_batch_size, test_sampler)
