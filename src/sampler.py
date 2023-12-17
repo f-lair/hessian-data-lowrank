@@ -116,7 +116,7 @@ class WeightedSampler(data.Sampler[int]):
         if self.inverse:
             self.weights = 1.0 / self.weights
 
-        torch.save(self.weights, "../results/distr/gradnorm_class_inv_distr.pth")
+        # torch.save(self.weights, "../results/distr/gradnorm_class_inv_distr.pth")
 
     def __len__(self) -> int:
         """
