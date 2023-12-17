@@ -64,6 +64,12 @@ def main() -> None:
     parser.add_argument("--data-path", type=str, default="../data/", help="Data path.")
     parser.add_argument("--results-path", type=str, default="../results/", help="Results path.")
     parser.add_argument(
+        "--compose-on-cpu",
+        default=False,
+        action="store_true",
+        help="Computes GGN realization on CPU instead of GPU (might exceed GPU memory otherwise).",
+    )
+    parser.add_argument(
         "--no-testing",
         default=False,
         action="store_true",
@@ -141,6 +147,7 @@ def main() -> None:
             n_steps,
             args.norm_saving,
             args.ggn_saving,
+            args.compose_on_cpu,
             args.no_progress_bar,
             args.results_path,
         )

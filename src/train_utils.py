@@ -250,22 +250,59 @@ def compute_ggn_decomp(
     return J_model, H_loss
 
 
-@partial(jax.jit, device=jax.devices("cpu")[0])  # type: ignore
 def compute_ggn(J_model: jax.Array, H_loss: jax.Array) -> jax.Array:
+    """
+    Computes GGN realization as product of Jacobians and Hessian.
+    C: Model output dim.
+    D: Parameter dim.
+    N: Batch dim.
+
+    Args:
+        J_model (jax.Array): Per-item J_model ([N, C, D]).
+        H_loss (jax.Array): Per-item H_loss ([N, C, C])
+
+    Returns:
+        jax.Array: Per-item GGN ([N, D, D])
+    """
+
     # Compute per-item Generalized Gauss-Newton (GGN) matrix: J_model.T @ H_loss @ J_model
-    GGN = jnp.einsum("nax,nab,nby->nxy", J_model, H_loss, J_model)  # [N, D, D]
-
-    return GGN
+    return jnp.einsum("nax,nab,nby->nxy", J_model, H_loss, J_model)  # [N, D, D]
 
 
-@partial(jax.jit, device=jax.devices("cpu")[0])  # type: ignore
 def aggregate_ggn(GGN_samples: jax.Array, GGN: jax.Array, aggregated_batch_size: int) -> jax.Array:
+    """
+    Aggregates GGN as moving average.
+    D: Parameter dim.
+    N: Batch dim.
+
+    Args:
+        GGN_samples (jax.Array): Previous GGN moving average ([N, D, D]).
+        GGN (jax.Array): New GGN sample ([N, D, D]).
+        aggregated_batch_size (int): Sample size after aggregation.
+
+    Returns:
+        jax.Array: Aggregated GGN moving average ([N, D, D]).
+    """
+
     # Aggregates GGN as moving average
     return GGN_samples + (GGN - GGN_samples) / aggregated_batch_size  # [N, D, D]
 
 
-@partial(jax.jit, device=jax.devices("cpu")[0])  # type: ignore
 def aggregate_ggn_total(GGN_total: jax.Array, GGN: jax.Array, GGN_counter: int) -> jax.Array:
+    """
+    Aggregates total GGN as moving average.
+    D: Parameter dim.
+    N: Batch dim.
+
+    Args:
+        GGN_total (jax.Array): Previous total GGN moving average ([D, D]).
+        GGN (jax.Array): New GGN sample ([N, D, D]).
+        GGN_counter (int): Total sample size after aggregation.
+
+    Returns:
+        jax.Array: Aggregated total GGN moving average ([D, D]).
+    """
+
     # Aggregates total GGN as moving average
     return GGN_total + jnp.sum(GGN - GGN_total[None, :, :], axis=0) / GGN_counter  # [D, D]
 
@@ -280,6 +317,7 @@ def train_epoch(
     n_steps: int,
     norm_saving: str,
     ggn_saving: str,
+    compose_on_cpu: bool,
     no_progress_bar: bool,
     results_path: str,
 ) -> Tuple[TrainState, float, float, jax.Array, int, int]:
@@ -296,6 +334,7 @@ def train_epoch(
         n_steps (int): Current number of completed training step across epochs.
         norm_saving (str): GGN norm saving: disabled, total, next, last.
         ggn_saving (str): GGN saving: disabled, dense.
+        compose_on_cpu (bool): Computes GGN realization on CPU instead of GPU (might exceed GPU memory otherwise).
         no_progress_bar (bool): Disables progress bar.
         results_path (str): Results path.
 
@@ -311,6 +350,12 @@ def train_epoch(
 
     n_classes = len(train_dataloader.dataset.classes)  # type: ignore
     train_step_jit = jax.jit(partial(train_step, n_classes=n_classes))
+
+    # Compute GGN realization on CPU, if needed
+    device = jax.devices("cpu")[0] if compose_on_cpu else None
+    compute_ggn_jit = jax.jit(compute_ggn, device=device)
+    aggregate_ggn_jit = jax.jit(aggregate_ggn, device=device)
+    aggregate_ggn_total_jit = jax.jit(aggregate_ggn_total, device=device)
 
     # Running statistics
     loss_epoch = []  # Per-item losses per training steps
@@ -369,7 +414,7 @@ def train_epoch(
                     J_model = jax.device_put(J_model, jax.devices('cpu')[0])
                     H_loss = jax.device_put(H_loss, jax.devices('cpu')[0])
                     # t3 = time()
-                    GGN = compute_ggn(J_model, H_loss)
+                    GGN = compute_ggn_jit(J_model, H_loss)
                     # t4 = time()
                     # print("compute_ggn_decomp:", t2 - t1)
                     # print("jax.device_put:", t3 - t2)
@@ -381,7 +426,7 @@ def train_epoch(
                     if GGN_samples is None:
                         GGN_samples = GGN.copy()  # [N, D, D]
                     else:
-                        GGN_samples = aggregate_ggn(
+                        GGN_samples = aggregate_ggn_jit(
                             GGN_samples, GGN, aggregated_batch_size
                         )  # [N, D, D]
 
@@ -431,7 +476,9 @@ def train_epoch(
                         if GGN_total is None:
                             GGN_total = jnp.mean(GGN, axis=0)  # [D, D]
                         else:
-                            GGN_total = aggregate_ggn_total(GGN_total, GGN, GGN_counter)  # [D, D]
+                            GGN_total = aggregate_ggn_total_jit(
+                                GGN_total, GGN, GGN_counter
+                            )  # [D, D]
 
                 # GGN-saving "dense" and not Norm-saving "disabled" or "total": Save total GGN on disk
                 if ggn_saving == "dense" and norm_saving in {"disabled", "total"}:
