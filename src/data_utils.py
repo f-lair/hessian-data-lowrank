@@ -71,6 +71,7 @@ def get_sampler(
             batch_size,
             inverse=False,
             replacement=False,
+            classwise=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "loss-inv":
@@ -81,6 +82,29 @@ def get_sampler(
             batch_size,
             inverse=True,
             replacement=False,
+            classwise=False,
+            no_progress_bar=no_progress_bar,
+        )
+    elif sampling == "loss-class":
+        return LossSampler(
+            dataset,
+            rng,
+            test_step_fn,
+            batch_size,
+            inverse=False,
+            replacement=False,
+            classwise=True,
+            no_progress_bar=no_progress_bar,
+        )
+    elif sampling == "loss-class-inv":
+        return LossSampler(
+            dataset,
+            rng,
+            test_step_fn,
+            batch_size,
+            inverse=True,
+            replacement=False,
+            classwise=True,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "loss-rep":
@@ -91,6 +115,7 @@ def get_sampler(
             batch_size,
             inverse=False,
             replacement=True,
+            classwise=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "loss-inv-rep":
@@ -101,6 +126,7 @@ def get_sampler(
             batch_size,
             inverse=True,
             replacement=True,
+            classwise=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm":
@@ -111,6 +137,7 @@ def get_sampler(
             batch_size,
             inverse=False,
             replacement=False,
+            classwise=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm-inv":
@@ -121,6 +148,29 @@ def get_sampler(
             batch_size,
             inverse=True,
             replacement=False,
+            classwise=False,
+            no_progress_bar=no_progress_bar,
+        )
+    elif sampling == "gradnorm-class":
+        return GradnormSampler(
+            dataset,
+            rng,
+            test_step_fn,
+            batch_size,
+            inverse=False,
+            replacement=False,
+            classwise=True,
+            no_progress_bar=no_progress_bar,
+        )
+    elif sampling == "gradnorm-class-inv":
+        return GradnormSampler(
+            dataset,
+            rng,
+            test_step_fn,
+            batch_size,
+            inverse=True,
+            replacement=False,
+            classwise=True,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm-rep":
@@ -131,6 +181,7 @@ def get_sampler(
             batch_size,
             inverse=False,
             replacement=True,
+            classwise=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm-inv-rep":
@@ -141,6 +192,7 @@ def get_sampler(
             batch_size,
             inverse=True,
             replacement=True,
+            classwise=False,
             no_progress_bar=no_progress_bar,
         )
     else:
