@@ -411,8 +411,9 @@ def train_epoch(
                     # t1 = time()
                     J_model, H_loss = compute_ggn_decomp(state, ggn_batch)  # [N, C, D], [N, C, C]
                     # t2 = time()
-                    J_model = jax.device_put(J_model, jax.devices('cpu')[0])
-                    H_loss = jax.device_put(H_loss, jax.devices('cpu')[0])
+                    if compose_on_cpu:
+                        J_model = jax.device_put(J_model, jax.devices('cpu')[0])
+                        H_loss = jax.device_put(H_loss, jax.devices('cpu')[0])
                     # t3 = time()
                     GGN = compute_ggn_jit(J_model, H_loss)
                     # t4 = time()
