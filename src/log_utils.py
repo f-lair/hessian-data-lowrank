@@ -22,17 +22,19 @@ def save_norm(
     os.makedirs(results_path, exist_ok=True)
 
     # Enable broadcasting
-    if GGN_1.ndim == 2 and GGN_2.ndim == 3:
-        GGN_1 = GGN_1[None, ...]
-    elif GGN_1.ndim == 3 and GGN_2.ndim == 2:
-        GGN_2 = GGN_2[None, ...]
-    elif GGN_1.ndim == 3 and GGN_2.ndim == 3:
-        GGN_1 = GGN_1[None, ...]
-        GGN_2 = GGN_2[:, None, ...]
-    else:
-        raise ValueError(f"Unsupported GGN dimensionalities: {GGN_1.shape}, {GGN_2.shape}")
-
     with jax.default_device(jax.devices("cpu")[0]):
+        if GGN_1.ndim == 2 and GGN_2.ndim == 3:
+            GGN_1 = GGN_1[None, ...]
+        elif GGN_1.ndim == 3 and GGN_2.ndim == 2:
+            GGN_2 = GGN_2[None, ...]
+        elif GGN_1.ndim == 3 and GGN_2.ndim == 3:
+            GGN_1 = GGN_1[None, ...]
+            GGN_2 = GGN_2[:, None, ...]
+        else:
+            raise ValueError(f"Unsupported GGN dimensionalities: {GGN_1.shape}, {GGN_2.shape}")
+
+        GGN_1 = jax.device_put(GGN_1, jax.devices('cpu')[0])
+        GGN_2 = jax.device_put(GGN_2, jax.devices('cpu')[0])
         f_norm = jnp.linalg.norm(GGN_1 - GGN_2, ord="fro", axis=(-2, -1))
     jnp.save(
         str(Path(results_path, f"f_norm_{batch_size}_batched_{step_idx}.npy")),
