@@ -72,6 +72,7 @@ def get_sampler(
             inverse=False,
             replacement=False,
             classwise=False,
+            classeq=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "loss-inv":
@@ -83,6 +84,7 @@ def get_sampler(
             inverse=True,
             replacement=False,
             classwise=False,
+            classeq=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "loss-class":
@@ -94,6 +96,19 @@ def get_sampler(
             inverse=False,
             replacement=False,
             classwise=True,
+            classeq=False,
+            no_progress_bar=no_progress_bar,
+        )
+    elif sampling == "loss-classeq":
+        return LossSampler(
+            dataset,
+            rng,
+            test_step_fn,
+            batch_size,
+            inverse=False,
+            replacement=False,
+            classwise=False,
+            classeq=True,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "loss-class-inv":
@@ -105,6 +120,19 @@ def get_sampler(
             inverse=True,
             replacement=False,
             classwise=True,
+            classeq=False,
+            no_progress_bar=no_progress_bar,
+        )
+    elif sampling == "loss-classeq-inv":
+        return LossSampler(
+            dataset,
+            rng,
+            test_step_fn,
+            batch_size,
+            inverse=True,
+            replacement=False,
+            classwise=False,
+            classeq=True,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "loss-rep":
@@ -116,6 +144,7 @@ def get_sampler(
             inverse=False,
             replacement=True,
             classwise=False,
+            classeq=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "loss-inv-rep":
@@ -127,6 +156,7 @@ def get_sampler(
             inverse=True,
             replacement=True,
             classwise=False,
+            classeq=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm":
@@ -138,6 +168,7 @@ def get_sampler(
             inverse=False,
             replacement=False,
             classwise=False,
+            classeq=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm-inv":
@@ -149,6 +180,7 @@ def get_sampler(
             inverse=True,
             replacement=False,
             classwise=False,
+            classeq=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm-class":
@@ -160,6 +192,19 @@ def get_sampler(
             inverse=False,
             replacement=False,
             classwise=True,
+            classeq=False,
+            no_progress_bar=no_progress_bar,
+        )
+    elif sampling == "gradnorm-classeq":
+        return GradnormSampler(
+            dataset,
+            rng,
+            test_step_fn,
+            batch_size,
+            inverse=False,
+            replacement=False,
+            classwise=False,
+            classeq=True,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm-class-inv":
@@ -171,6 +216,19 @@ def get_sampler(
             inverse=True,
             replacement=False,
             classwise=True,
+            classeq=False,
+            no_progress_bar=no_progress_bar,
+        )
+    elif sampling == "gradnorm-classeq-inv":
+        return GradnormSampler(
+            dataset,
+            rng,
+            test_step_fn,
+            batch_size,
+            inverse=True,
+            replacement=False,
+            classwise=False,
+            classeq=True,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm-rep":
@@ -182,6 +240,7 @@ def get_sampler(
             inverse=False,
             replacement=True,
             classwise=False,
+            classeq=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm-inv-rep":
@@ -193,6 +252,7 @@ def get_sampler(
             inverse=True,
             replacement=True,
             classwise=False,
+            classeq=False,
             no_progress_bar=no_progress_bar,
         )
     else:

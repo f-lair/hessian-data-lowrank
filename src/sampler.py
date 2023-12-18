@@ -25,6 +25,7 @@ class WeightedSampler(data.Sampler[int]):
         inverse: bool,
         replacement: bool,
         classwise: bool,
+        classeq: bool,
         no_progress_bar: bool,
     ) -> None:
         """
@@ -37,6 +38,7 @@ class WeightedSampler(data.Sampler[int]):
             inverse (bool): If set, samples data items with lowest weight with highest probability.
             replacement (bool): If set, samples with replacement.
             classwise (bool): If set, samples class weight-based and intra-class uniformly.
+            classeq (bool): If set, samples class uniformly and intra-class weight-based.
             no_progress_bar (bool): Disables progress bar.
         """
 
@@ -46,6 +48,9 @@ class WeightedSampler(data.Sampler[int]):
         self.inverse = inverse
         self.replacement = replacement
         self.classwise = classwise
+        self.classeq = classeq
+
+        assert not (self.classwise and self.classeq), "Invalid WeightedSampler configuration!"
 
         self.no_progress_bar = no_progress_bar
 
@@ -58,6 +63,9 @@ class WeightedSampler(data.Sampler[int]):
         if self.classwise:
             self.class_assignments = self._get_class_assignments()
             self.weights = torch.ones((len(self.class_assignments),))
+        elif self.classeq:
+            self.class_assignments = self._get_class_assignments()
+            self.weights = torch.ones((self.data_len,))
         else:
             self.weights = torch.ones((self.data_len,))
 
@@ -136,27 +144,45 @@ class WeightedSampler(data.Sampler[int]):
             Iterator[int]: Iterator over sampled data items.
         """
 
-        if self.classwise:
-            perm_interclass = torch.multinomial(
-                self.weights, self.data_len, True, generator=self.rng
-            )
-            _, class_counts = torch.unique(perm_interclass, return_counts=True)
-            perm_intraclass = {
-                class_idx: torch.multinomial(
-                    torch.ones(
-                        len(data_indices),
-                    ),
-                    class_counts[class_idx],
-                    True,
-                    generator=self.rng,
+        if self.classwise or self.classeq:
+            if self.classwise:
+                # Weighted inter-class distribution
+                perm_interclass = torch.multinomial(
+                    self.weights, self.data_len, True, generator=self.rng
                 )
-                for class_idx, data_indices in self.class_assignments.items()
-            }
+                _, class_counts = torch.unique(perm_interclass, return_counts=True)
+                # Uniform intra-class distribution
+                perm_intraclass = {
+                    class_idx: torch.randint(
+                        0, len(data_indices), (class_counts[class_idx],), generator=self.rng
+                    )
+                    for class_idx, data_indices in self.class_assignments.items()
+                }
+            else:
+                # Uniform inter-class distribution
+                perm_interclass = torch.randint(
+                    0, len(self.class_assignments), (self.data_len,), generator=self.rng
+                )
+                _, class_counts = torch.unique(perm_interclass, return_counts=True)
+                # Weighted intra-class distribution
+                perm_intraclass = {
+                    class_idx: torch.multinomial(
+                        self.weights[data_indices],
+                        class_counts[class_idx],
+                        True,
+                        generator=self.rng,
+                    )
+                    for class_idx, data_indices in self.class_assignments.items()
+                }
+            # Map first from inter-class sampled indices to intra-class sampled indices, then to actual data indices
             counter_intraclass = {class_idx: 0 for class_idx in self.class_assignments.keys()}
             perm = torch.zeros_like(perm_interclass)
             for data_idx in range(self.data_len):
                 class_idx = int(perm_interclass[data_idx].item())
-                perm[data_idx] = perm_intraclass[class_idx][counter_intraclass[class_idx]]
+                intraclass_idx = int(
+                    perm_intraclass[class_idx][counter_intraclass[class_idx]].item()
+                )
+                perm[data_idx] = self.class_assignments[class_idx][intraclass_idx]
                 counter_intraclass[class_idx] += 1
         else:
             perm = torch.multinomial(
@@ -177,6 +203,7 @@ class LossSampler(WeightedSampler):
         inverse: bool,
         replacement: bool,
         classwise: bool,
+        classeq: bool,
         no_progress_bar: bool,
     ) -> None:
         """
@@ -190,11 +217,12 @@ class LossSampler(WeightedSampler):
             inverse (bool): If set, samples data items with lowest loss with highest probability.
             replacement (bool): If set, samples with replacement.
             classwise (bool): If set, samples class loss-based and intra-class uniformly.
+            classeq (bool): If set, samples class uniformly and intra-class weight-based.
             no_progress_bar (bool): Disables progress bar.
         """
 
         super().__init__(
-            data_source, rng, batch_size, inverse, replacement, classwise, no_progress_bar
+            data_source, rng, batch_size, inverse, replacement, classwise, classeq, no_progress_bar
         )
         self.step_fn = jax.jit(partial(step_fn, n_classes=len(data_source.classes)))  # type: ignore
 
@@ -233,6 +261,7 @@ class GradnormSampler(WeightedSampler):
         inverse: bool,
         replacement: bool,
         classwise: bool,
+        classeq: bool,
         no_progress_bar: bool,
     ) -> None:
         """
@@ -246,11 +275,12 @@ class GradnormSampler(WeightedSampler):
             inverse (bool): If set, samples data items with lowest gradient-norm with highest probability.
             replacement (bool): If set, samples with replacement.
             classwise (bool): If set, samples class loss-based and intra-class uniformly.
+            classeq (bool): If set, samples class uniformly and intra-class weight-based.
             no_progress_bar (bool): Disables progress bar.
         """
 
         super().__init__(
-            data_source, rng, batch_size, inverse, replacement, classwise, no_progress_bar
+            data_source, rng, batch_size, inverse, replacement, classwise, classeq, no_progress_bar
         )
         self.step_fn = jax.jit(partial(step_fn, n_classes=len(data_source.classes), return_grad=True))  # type: ignore
 
