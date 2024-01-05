@@ -7,7 +7,7 @@ from tqdm import trange
 
 from data_loader import DataLoader
 from data_utils import get_dataset, get_sampler
-from log_utils import save_train_log
+from log_utils import get_save_measure, save_train_log
 from model import get_model
 from train_utils import test_epoch, test_step, train_epoch, train_step
 
@@ -49,10 +49,16 @@ def main() -> None:
         help="Number of GGN samples per GGN iteration. Equivalent to the batch size per forward pass in GGN computation.",
     )
     parser.add_argument(
-        "--norm-saving",
+        "--measure",
+        type=str,
+        default="frobenius",
+        help="Error measure: frobenius (default), eig-overlap.",
+    )
+    parser.add_argument(
+        "--measure-saving",
         type=str,
         default="disabled",
-        help="GGN norm saving: disabled (default), total, next, last.",
+        help="GGN error measure saving: disabled (default), total, next, last.",
     )
     parser.add_argument(
         "--ggn-saving",
@@ -82,7 +88,7 @@ def main() -> None:
     prng_key = jax.random.key(args.rng_seed)
 
     assert not (
-        args.norm_saving == "disabled" and args.ggn_saving == "disabled"
+        args.measure_saving == "disabled" and args.ggn_saving == "disabled"
     ), "No results are stored in this configutation!"
 
     # Load data
@@ -116,6 +122,9 @@ def main() -> None:
     test_dataloader = DataLoader(test_dataset, args.train_batch_size, test_sampler)
     ggn_dataloader = DataLoader(train_dataset, args.ggn_samples, ggn_sampler)
 
+    # Get measure
+    save_measure = get_save_measure(args.measure, len(train_dataset.classes), args.compose_on_cpu)  # type: ignore
+
     # Setup model
     model = get_model(args.dataset, args.hidden_dim)
     prng_key, model_init_key = jax.random.split(prng_key)
@@ -145,7 +154,9 @@ def main() -> None:
             args.ggn_freq,
             n_ggn_iterations,
             n_steps,
-            args.norm_saving,
+            prng_key,
+            save_measure,
+            args.measure_saving,
             args.ggn_saving,
             args.compose_on_cpu,
             args.no_progress_bar,

@@ -1,7 +1,7 @@
 from functools import partial
 from pathlib import Path
 from time import time
-from typing import Any, List, Tuple
+from typing import Any, Callable, List, Tuple
 
 import jax
 import optax
@@ -12,7 +12,7 @@ from jax import tree_util
 from tqdm import tqdm
 
 from data_loader import DataLoader
-from log_utils import load_ggn, remove_ggn, save_ggn, save_norm
+from log_utils import load_ggn, remove_ggn, save_ggn
 from sampler import WeightedSampler
 
 
@@ -315,7 +315,9 @@ def train_epoch(
     ggn_freq: int,
     n_ggn_iterations: int,
     n_steps: int,
-    norm_saving: str,
+    prng_key: jax.random.KeyArray,
+    save_measure: Callable,
+    measure_saving: str,
     ggn_saving: str,
     compose_on_cpu: bool,
     no_progress_bar: bool,
@@ -332,7 +334,9 @@ def train_epoch(
         ggn_freq (int): Frequency of GGN iterations.
         n_ggn_iterations (int): Number of GGN iterations.
         n_steps (int): Current number of completed training step across epochs.
-        norm_saving (str): GGN norm saving: disabled, total, next, last.
+        prng_key (jax.random.KeyArray): Random key.
+        save_measure (Callable): GGN error measure: GGN_1 [N_1, D, D], GGN_2 [N_2, D, D] -> measure [N_1, N_2] saved on disk.
+        measure_saving (str): GGN error measure saving: disabled, total, next, last.
         ggn_saving (str): GGN saving: disabled, dense.
         compose_on_cpu (bool): Computes GGN realization on CPU instead of GPU (might exceed GPU memory otherwise).
         no_progress_bar (bool): Disables progress bar.
@@ -437,24 +441,28 @@ def train_epoch(
                         if ggn_batch_size_idx > 0:
                             prev_ggn_batch_size = ggn_batch_sizes[ggn_batch_size_idx - 1]
                             # Norm-saving "next": Load previous batched GGN samples, compute norm
-                            if norm_saving == "next":
+                            if measure_saving == "next":
                                 prev_GGN_samples = load_ggn(
                                     n_steps, results_path, batch_size=prev_ggn_batch_size
                                 )
-                                save_norm(
+                                save_measure(
                                     prev_GGN_samples,
                                     GGN_samples,
+                                    prng_key,
                                     n_steps,
                                     results_path,
-                                    batch_size=prev_ggn_batch_size,
+                                    prev_ggn_batch_size,
                                 )
                             # GGN-saving "disabled" and not norm-saving "total" or "last": Remove previous batched GGN samples
-                            if ggn_saving == "disabled" and norm_saving not in {"total", "last"}:
+                            if ggn_saving == "disabled" and measure_saving not in {
+                                "total",
+                                "last",
+                            }:
                                 remove_ggn(n_steps, results_path, batch_size=prev_ggn_batch_size)
 
                         # Not norm-saving "next" or not ggn-saving "disabled" or not last GGN samples: Save GGN samples
                         if (
-                            norm_saving != "next"
+                            measure_saving != "next"
                             or ggn_saving != "disabled"
                             or ggn_batch_size_idx + 1 < len(ggn_batch_sizes)
                         ):
@@ -466,13 +474,13 @@ def train_epoch(
                             )
 
                         # Norm-saving "next" or "last" and last GGN samples: Stop further GGN computations
-                        if norm_saving in {"next", "last"} and ggn_batch_size_idx + 1 == len(
+                        if measure_saving in {"next", "last"} and ggn_batch_size_idx + 1 == len(
                             ggn_batch_sizes
                         ):
                             break
 
                     # Norm-saving "disabled" or "total": Compute total GGN as running average to save memory
-                    if norm_saving in {"disabled", "total"}:
+                    if measure_saving in {"disabled", "total"}:
                         GGN_counter += GGN.shape[0]
                         if GGN_total is None:
                             GGN_total = jnp.mean(GGN, axis=0)  # [D, D]
@@ -482,36 +490,38 @@ def train_epoch(
                             )  # [D, D]
 
                 # GGN-saving "dense" and not Norm-saving "disabled" or "total": Save total GGN on disk
-                if ggn_saving == "dense" and norm_saving in {"disabled", "total"}:
+                if ggn_saving == "dense" and measure_saving in {"disabled", "total"}:
                     save_ggn(GGN_total, n_steps, results_path)  # type: ignore
 
                 # Norm-saving "total": Compute norm
-                if norm_saving == "total":
+                if measure_saving == "total":
                     for ggn_batch_size in ggn_batch_sizes:
                         GGN_samples = load_ggn(n_steps, results_path, batch_size=ggn_batch_size)
-                        save_norm(
+                        save_measure(
                             GGN_samples,
                             GGN_total,  # type: ignore
+                            prng_key,
                             n_steps,
                             results_path,
-                            batch_size=ggn_batch_size,
+                            ggn_batch_size,
                         )
                         # GGN-saving "disabled" : Remove batched GGN samples
                         if ggn_saving == "disabled":
                             remove_ggn(n_steps, results_path, batch_size=ggn_batch_size)
                 # Norm-saving "last": Compute norm
-                elif norm_saving == "last":
+                elif measure_saving == "last":
                     GGN_samples_last = load_ggn(
                         n_steps, results_path, batch_size=ggn_batch_sizes[-1]
                     )
                     for ggn_batch_size in ggn_batch_sizes[:-1]:
                         GGN_samples = load_ggn(n_steps, results_path, batch_size=ggn_batch_size)
-                        save_norm(
+                        save_measure(
                             GGN_samples,
                             GGN_samples_last,
+                            prng_key,
                             n_steps,
                             results_path,
-                            batch_size=ggn_batch_size,
+                            ggn_batch_size,
                         )
                         # GGN-saving "disabled" : Remove batched GGN samples
                         if ggn_saving == "disabled":
