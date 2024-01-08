@@ -419,6 +419,7 @@ def train_epoch(
                         J_model = jax.device_put(J_model, jax.devices('cpu')[0])
                         H_loss = jax.device_put(H_loss, jax.devices('cpu')[0])
                     # t3 = time()
+                    datapoints.append(H_loss)
                     GGN = compute_ggn_jit(J_model, H_loss)
                     # t4 = time()
                     # print("compute_ggn_decomp:", t2 - t1)
@@ -438,6 +439,18 @@ def train_epoch(
                     # Save GGN samples on disk, if needed aggregated batch size reached
                     if aggregated_batch_size in ggn_batch_sizes:
                         ggn_batch_size_idx = ggn_batch_sizes.index(aggregated_batch_size)
+                        H_f_norms = jnp.linalg.norm(
+                            jnp.concatenate(datapoints), ord="fro", axis=(-1, -2)
+                        )
+                        jnp.save(
+                            str(
+                                Path(
+                                    results_path,
+                                    f"H_f_norm_{aggregated_batch_size}_batched_{n_steps}.npy",
+                                )
+                            ),
+                            H_f_norms,
+                        )
                         if ggn_batch_size_idx > 0:
                             prev_ggn_batch_size = ggn_batch_sizes[ggn_batch_size_idx - 1]
                             # Norm-saving "next": Load previous batched GGN samples, compute norm
