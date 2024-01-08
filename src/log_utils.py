@@ -19,7 +19,7 @@ def save_train_log(train_log: Dict[str, List[float]], results_path: str) -> None
 
 
 def get_save_measure(measure: str, num_classes: int, compose_on_cpu: bool) -> Callable:
-    if measure == "f-norm":
+    if measure == "frobenius":
         return save_f_norm
     elif measure == "eig-overlap":
         return partial(
