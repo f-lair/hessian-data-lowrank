@@ -1,3 +1,4 @@
+import os
 from functools import partial
 from pathlib import Path
 from time import time
@@ -442,6 +443,7 @@ def train_epoch(
                         H_f_norms = jnp.linalg.norm(
                             jnp.concatenate(datapoints), ord="fro", axis=(-1, -2)
                         )
+                        os.makedirs(results_path, exist_ok=True)
                         jnp.save(
                             str(
                                 Path(
