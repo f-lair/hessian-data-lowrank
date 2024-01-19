@@ -13,7 +13,7 @@ from jax import tree_util
 from tqdm import tqdm
 
 from data_loader import DataLoader
-from log_utils import load_ggn, remove_ggn, save_ggn
+from log_utils import load_ggn, remove_ggn, save_eigh_lobpcg_overlap, save_ggn
 from sampler import WeightedSampler
 
 
@@ -420,7 +420,7 @@ def train_epoch(
                         J_model = jax.device_put(J_model, jax.devices('cpu')[0])
                         H_loss = jax.device_put(H_loss, jax.devices('cpu')[0])
                     # t3 = time()
-                    datapoints.append(H_loss)
+                    # datapoints.append(H_loss)
                     GGN = compute_ggn_jit(J_model, H_loss)
                     # t4 = time()
                     # print("compute_ggn_decomp:", t2 - t1)
@@ -440,19 +440,19 @@ def train_epoch(
                     # Save GGN samples on disk, if needed aggregated batch size reached
                     if aggregated_batch_size in ggn_batch_sizes:
                         ggn_batch_size_idx = ggn_batch_sizes.index(aggregated_batch_size)
-                        H_f_norms = jnp.linalg.norm(
-                            jnp.concatenate(datapoints), ord="fro", axis=(-1, -2)
-                        )
-                        os.makedirs(results_path, exist_ok=True)
-                        jnp.save(
-                            str(
-                                Path(
-                                    results_path,
-                                    f"H_f_norm_{aggregated_batch_size}_batched_{n_steps}.npy",
-                                )
-                            ),
-                            H_f_norms,
-                        )
+                        # H_f_norms = jnp.linalg.norm(
+                        #     jnp.concatenate(datapoints), ord="fro", axis=(-1, -2)
+                        # )
+                        # os.makedirs(results_path, exist_ok=True)
+                        # jnp.save(
+                        #     str(
+                        #         Path(
+                        #             results_path,
+                        #             f"H_f_norm_{aggregated_batch_size}_batched_{n_steps}.npy",
+                        #         )
+                        #     ),
+                        #     H_f_norms,
+                        # )
                         if ggn_batch_size_idx > 0:
                             prev_ggn_batch_size = ggn_batch_sizes[ggn_batch_size_idx - 1]
                             # Norm-saving "next": Load previous batched GGN samples, compute norm
@@ -485,6 +485,15 @@ def train_epoch(
                                 GGN_samples,
                                 n_steps,
                                 results_path,
+                                batch_size=aggregated_batch_size,
+                            )
+                            save_eigh_lobpcg_overlap(
+                                GGN_samples,
+                                prng_key,
+                                n_steps,
+                                results_path,
+                                10,
+                                compose_on_cpu,
                                 batch_size=aggregated_batch_size,
                             )
 
@@ -520,9 +529,19 @@ def train_epoch(
                             results_path,
                             ggn_batch_size,
                         )
+                        # save_eigh_lobpcg_overlap(
+                        #     GGN_samples,
+                        #     prng_key,
+                        #     n_steps,
+                        #     results_path,
+                        #     10,
+                        #     compose_on_cpu,
+                        #     batch_size=ggn_batch_size,
+                        # )
                         # GGN-saving "disabled" : Remove batched GGN samples
                         if ggn_saving == "disabled":
                             remove_ggn(n_steps, results_path, batch_size=ggn_batch_size)
+                    save_eigh_lobpcg_overlap(GGN_total, prng_key, n_steps, results_path, 10, compose_on_cpu)  # type: ignore
                 # Norm-saving "last": Compute norm
                 elif measure_saving == "last":
                     GGN_samples_last = load_ggn(

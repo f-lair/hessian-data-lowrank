@@ -1,13 +1,14 @@
 import os
 from functools import partial
 from pathlib import Path
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Tuple
 
 import jax
+import numpy as np
 import pandas as pd
 from jax import numpy as jnp
-from jax import scipy as jsp
 from jax.experimental.sparse.linalg import lobpcg_standard
+from jax.scipy.linalg import eigh
 
 
 def save_train_log(train_log: Dict[str, List[float]], results_path: str) -> None:
@@ -82,10 +83,42 @@ def compute_topc_eigenspace_overlap(
     _, eigv_1, _ = lobpcg_standard(GGN_1, eigv_1)
     _, eigv_2, _ = lobpcg_standard(GGN_2, eigv_2)
 
+    # _, eigv_1c = eigh(GGN_1, subset_by_index=(D - num_classes, D - 1))
+    # _, eigv_2c = eigh(GGN_2, subset_by_index=(D - num_classes, D - 1))
+
+    # print("1", np.linalg.norm(np.asarray(eigv_1) - eigv_1c, ord="fro"))
+    # print("2", np.linalg.norm(np.asarray(eigv_2) - eigv_2c, ord="fro"))
+
     # Tr(P^{U} @ P^{V}) / (Tr(P^{U}) * Tr(P^{V}))^(-0.5)
     return jnp.einsum("ij,ij->", eigv_1 @ eigv_1.T, eigv_2 @ eigv_2.T) / jnp.sqrt(
         jnp.einsum("ij,ij->", eigv_1, eigv_1) * jnp.einsum("ij,ij->", eigv_2, eigv_2)
     )
+
+
+def compute_eigh_lobpcg_overlap(
+    GGN: jax.Array, prng_key: jax.random.KeyArray, num_classes: int
+) -> Tuple[jax.Array, jax.Array]:
+    D, _ = GGN.shape
+
+    # LOBPCG
+    eigvec_lobpcg = jax.random.normal(prng_key, (D, num_classes))
+    _, eigvec_lobpcg, _ = lobpcg_standard(GGN, eigvec_lobpcg)
+
+    # EIGH
+    eigval_eigh, eigvec_eigh = eigh(GGN)
+    # Use only top-C eigenvectors for overlap
+    eigvec_eigh = jnp.flip(eigvec_eigh[:, -num_classes:], axis=1)
+    eigval_eigh = jnp.flip(eigval_eigh)
+
+    # Tr(P^{U} @ P^{V}) / (Tr(P^{U}) * Tr(P^{V}))^(-0.5)
+    eig_overlap = jnp.einsum(
+        "ij,ij->", eigvec_lobpcg @ eigvec_lobpcg.T, eigvec_eigh @ eigvec_eigh.T
+    ) / jnp.sqrt(
+        jnp.einsum("ij,ij->", eigvec_lobpcg, eigvec_lobpcg)
+        * jnp.einsum("ij,ij->", eigvec_eigh, eigvec_eigh)
+    )
+
+    return eig_overlap, eigval_eigh
 
 
 def save_topc_eigenspace_overlap(
@@ -132,6 +165,54 @@ def save_topc_eigenspace_overlap(
         str(Path(results_path, f"eig_overlap_{batch_size}_batched_{step_idx}.npy")),
         topc_eigenspace_overlap,
     )
+
+
+def save_eigh_lobpcg_overlap(
+    GGN: jax.Array,
+    prng_key: jax.random.KeyArray,
+    step_idx: int,
+    results_path: str,
+    num_classes: int,
+    compose_on_cpu: bool,
+    batch_size: int | None = None,
+) -> None:
+    # Create results dir, if not existing
+    os.makedirs(results_path, exist_ok=True)
+
+    device = jax.devices("cpu")[0] if compose_on_cpu else None
+    with jax.default_device(device):
+        if GGN.ndim == 2:
+            GGN = GGN[None, ...]
+    prng_key_vmap = jax.random.split(prng_key, GGN.shape[0])
+
+    compute_eigh_lobpcg_overlap_jit = jax.jit(
+        partial(compute_eigh_lobpcg_overlap, num_classes=num_classes), device=device
+    )
+    compute_eigh_lobpcg_overlap_vmap = jax.vmap(compute_eigh_lobpcg_overlap_jit)
+
+    topc_eigenspace_overlap, eigvals = compute_eigh_lobpcg_overlap_vmap(
+        GGN,
+        prng_key_vmap,
+    )
+
+    if batch_size is None:
+        jnp.save(
+            str(Path(results_path, f"lobpcg_eigh_overlap_total_{step_idx}.npy")),
+            topc_eigenspace_overlap,
+        )
+        jnp.save(
+            str(Path(results_path, f"eigh_eigvals_total_{step_idx}.npy")),
+            eigvals,
+        )
+    else:
+        jnp.save(
+            str(Path(results_path, f"lobpcg_eigh_overlap_{batch_size}_batched_{step_idx}.npy")),
+            topc_eigenspace_overlap,
+        )
+        jnp.save(
+            str(Path(results_path, f"eigh_eigvals_{batch_size}_batched_{step_idx}.npy")),
+            eigvals,
+        )
 
 
 def save_ggn(
