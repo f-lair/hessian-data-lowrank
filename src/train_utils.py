@@ -498,10 +498,8 @@ def train_epoch(
                                 batch_size=aggregated_batch_size,
                             )
 
-                        # Norm-saving "next" or "last" and last GGN samples: Stop further GGN computations
-                        if measure_saving in {"next", "last"} and ggn_batch_size_idx + 1 == len(
-                            ggn_batch_sizes
-                        ):
+                        # Last GGN samples: Stop further GGN computations
+                        if ggn_batch_size_idx + 1 == len(ggn_batch_sizes):
                             break
                 # Norm-saving "last": Compute norm
                 if measure_saving == "last":
@@ -574,20 +572,20 @@ def train_epoch(
                                 ggn_batch_size,
                             )
                             # LOBPCG-EIGH
-                            # save_eigh_lobpcg_overlap(
-                            #     GGN_samples,
-                            #     prng_key,
-                            #     n_steps,
-                            #     results_path,
-                            #     10,
-                            #     compose_on_cpu,
-                            #     batch_size=ggn_batch_size,
-                            # )
+                            save_eigh_lobpcg_overlap(
+                                GGN_samples,
+                                prng_key,
+                                n_steps,
+                                results_path,
+                                10,
+                                compose_on_cpu,
+                                batch_size=ggn_batch_size,
+                            )
                             # GGN-saving "disabled" : Remove batched GGN samples
                             if ggn_saving == "disabled":
                                 remove_ggn(n_steps, results_path, batch_size=ggn_batch_size)
                         # LOBPCG-EIGH
-                        # save_eigh_lobpcg_overlap(GGN_total, prng_key, n_steps, results_path, 10, compose_on_cpu)  # type: ignore
+                        save_eigh_lobpcg_overlap(GGN_total, prng_key, n_steps, results_path, 10, compose_on_cpu)  # type: ignore
 
             # Perform training step
             state, loss, n_correct_per_class, n_per_class = train_step_jit(
