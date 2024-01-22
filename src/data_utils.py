@@ -61,7 +61,9 @@ def get_sampler(
 
     rng = torch.manual_seed(rng_seed)
 
-    if sampling == "uniform":
+    if sampling == "sequential":
+        return data.SequentialSampler(dataset)  # type: ignore
+    elif sampling == "uniform":
         return data.RandomSampler(dataset, generator=rng)  # type: ignore
     elif sampling == "loss":
         return LossSampler(

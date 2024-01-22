@@ -215,6 +215,51 @@ def save_eigh_lobpcg_overlap(
         )
 
 
+def save_ltk(
+    LTK: jax.Array,
+    step_idx: int,
+    results_path: str,
+    batch_size: int | None = None,
+) -> None:
+    """
+    Saves LTKs on disk.
+    C: Class dim.
+    N: Number of LTK samples.
+    M: Number of test datapoints.
+
+    Args:
+        LTK(jax.Array): Total LTK ([M, C, C]) or LTK samples ([N, M, C, C]).
+        step_idx (int): Training step index.
+        results_path (str): Results path.
+        batch_size (int | None, optional): Batch size (only needed, if LTK samples passed). Defaults to None.
+
+    Raises:
+        ValueError: No batch size passed for LTK samples.
+        ValueError: Unsupported LTK dimensionality.
+    """
+
+    # Create results dir, if not existing
+    os.makedirs(results_path, exist_ok=True)
+
+    # Total LTK ([M, C, C])
+    if LTK.ndim == 3:
+        jnp.save(
+            str(Path(results_path, f"LTK_total_{step_idx}.npy")),
+            LTK,
+        )
+    # LTK samples ([N, M, C, C])
+    elif LTK.ndim == 4:
+        if batch_size is None:
+            raise ValueError(f"LTK samples requires batch size argument.")
+
+        jnp.save(
+            str(Path(results_path, f"LTK_{batch_size}_batched_{step_idx}.npy")),
+            LTK,
+        )
+    else:
+        raise ValueError(f"Unsupported LTK dimensionality: {LTK.shape}")
+
+
 def save_ggn(
     GGN: jax.Array,
     step_idx: int,

@@ -66,6 +66,12 @@ def main() -> None:
         default="dense",
         help="GGN saving: disabled, dense (default).",
     )
+    parser.add_argument(
+        "--uq",
+        type=str,
+        default="disabled",
+        help="Computes uncertainty for test data using Laplace Approximations: disabled (default), sampled, total.",
+    )
     parser.add_argument("--rng-seed", type=int, default=7, help="RNG seed.")
     parser.add_argument("--data-path", type=str, default="../data/", help="Data path.")
     parser.add_argument("--results-path", type=str, default="../results/", help="Results path.")
@@ -87,10 +93,6 @@ def main() -> None:
     args = parser.parse_args()
     prng_key = jax.random.key(args.rng_seed)
 
-    assert not (
-        args.measure_saving == "disabled" and args.ggn_saving == "disabled"
-    ), "No results are stored in this configutation!"
-
     # Load data
     train_dataset = get_dataset(args.dataset, train=True, px=args.px, path=args.data_path)
     test_dataset = get_dataset(args.dataset, train=False, px=args.px, path=args.data_path)
@@ -103,7 +105,7 @@ def main() -> None:
         args.no_progress_bar,
     )
     test_sampler = get_sampler(
-        "uniform",
+        "sequential",
         test_dataset,
         args.rng_seed,
         test_step,
@@ -173,7 +175,17 @@ def main() -> None:
         # Perform testing epoch
         if not args.no_testing:
             test_loss, test_accuracy, test_accuracy_per_class = test_epoch(
-                train_state, test_dataloader, args.no_progress_bar
+                train_state,
+                test_dataloader,
+                ggn_dataloader,
+                ggn_batch_sizes,
+                args.uq
+                if epoch_idx == args.epochs - 1
+                else "disabled",  # UQ only after last epoch
+                n_steps,
+                prng_key,
+                args.no_progress_bar,
+                args.results_path,
             )
             pbar_stats["test-loss"] = round(test_loss, 6)
             pbar_stats["test-acc"] = round(test_accuracy, 4)
