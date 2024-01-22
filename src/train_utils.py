@@ -744,7 +744,7 @@ def test_epoch(
     if uncertainty_quantification == "total":
         for ltk_step_idx, ltk_batch in enumerate(
             tqdm(
-                ltk_dataloader,
+                ltk_total_dataloader,
                 desc="LTK-total-step",
                 disable=no_progress_bar,
             )
