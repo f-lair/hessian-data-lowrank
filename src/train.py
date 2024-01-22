@@ -40,7 +40,7 @@ def main() -> None:
         "--ggn-sampling",
         type=str,
         default="uniform",
-        help="Sampling method for GGN computation: uniform (default), loss(-x), gradnorm(-x); x={inv, rep, class, classeq, inv-rep, class-inv, classeq-inv}.",
+        help="Sampling method for GGN computation: uniform (default), loss(-x), gradnorm(-x); x={inv, class, classeq, class-inv, classeq-inv}.",
     )
     parser.add_argument(
         "--ggn-samples",
@@ -102,6 +102,7 @@ def main() -> None:
         args.rng_seed,
         test_step,
         args.train_batch_size,
+        0,
         args.no_progress_bar,
     )
     test_sampler = get_sampler(
@@ -110,6 +111,7 @@ def main() -> None:
         args.rng_seed,
         test_step,
         args.train_batch_size,
+        0,
         args.no_progress_bar,
     )
     ggn_sampler = get_sampler(
@@ -118,11 +120,22 @@ def main() -> None:
         args.rng_seed + 1,
         test_step,
         args.train_batch_size,
+        args.ggn_samples,
+        args.no_progress_bar,
+    )
+    ggn_total_sampler = get_sampler(
+        args.ggn_sampling,
+        train_dataset,
+        args.rng_seed + 1,
+        test_step,
+        args.train_batch_size,
+        1,
         args.no_progress_bar,
     )
     train_dataloader = DataLoader(train_dataset, args.train_batch_size, train_sampler)
     test_dataloader = DataLoader(test_dataset, args.train_batch_size, test_sampler)
     ggn_dataloader = DataLoader(train_dataset, args.ggn_samples, ggn_sampler)
+    ggn_total_dataloader = DataLoader(train_dataset, args.ggn_samples, ggn_total_sampler)
 
     # Get measure
     save_measure = get_save_measure(args.measure, len(train_dataset.classes), args.compose_on_cpu)  # type: ignore
@@ -152,6 +165,7 @@ def main() -> None:
             train_state,
             train_dataloader,
             ggn_dataloader,
+            ggn_total_dataloader,
             ggn_batch_sizes,
             args.ggn_freq,
             n_ggn_iterations,
@@ -178,6 +192,7 @@ def main() -> None:
                 train_state,
                 test_dataloader,
                 ggn_dataloader,
+                ggn_total_dataloader,
                 ggn_batch_sizes,
                 args.uq
                 if epoch_idx == args.epochs - 1

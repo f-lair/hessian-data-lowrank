@@ -39,6 +39,7 @@ def get_sampler(
     rng_seed: int,
     test_step_fn: Callable,
     batch_size: int,
+    replacement_stride: int,
     no_progress_bar: bool,
 ) -> data.Sampler:
     """
@@ -50,6 +51,7 @@ def get_sampler(
         rng_seed (int): RNG seed.
         test_step_fn (Callable): Step function taking a train state and data batch and yielding the loss.
         batch_size (int): Batch size used for loss computations.
+        replacement_stride (int): Number of consecutive sampled datapoints that can be identical.
         no_progress_bar (bool): Disables progress bar.
 
     Raises:
@@ -71,8 +73,8 @@ def get_sampler(
             rng,
             test_step_fn,
             batch_size,
+            replacement_stride=replacement_stride,
             inverse=False,
-            replacement=False,
             classwise=False,
             classeq=False,
             no_progress_bar=no_progress_bar,
@@ -83,8 +85,8 @@ def get_sampler(
             rng,
             test_step_fn,
             batch_size,
+            replacement_stride=replacement_stride,
             inverse=True,
-            replacement=False,
             classwise=False,
             classeq=False,
             no_progress_bar=no_progress_bar,
@@ -95,8 +97,8 @@ def get_sampler(
             rng,
             test_step_fn,
             batch_size,
+            replacement_stride=replacement_stride,
             inverse=False,
-            replacement=False,
             classwise=True,
             classeq=False,
             no_progress_bar=no_progress_bar,
@@ -107,8 +109,8 @@ def get_sampler(
             rng,
             test_step_fn,
             batch_size,
+            replacement_stride=replacement_stride,
             inverse=False,
-            replacement=False,
             classwise=False,
             classeq=True,
             no_progress_bar=no_progress_bar,
@@ -119,8 +121,8 @@ def get_sampler(
             rng,
             test_step_fn,
             batch_size,
+            replacement_stride=replacement_stride,
             inverse=True,
-            replacement=False,
             classwise=True,
             classeq=False,
             no_progress_bar=no_progress_bar,
@@ -131,34 +133,10 @@ def get_sampler(
             rng,
             test_step_fn,
             batch_size,
+            replacement_stride=replacement_stride,
             inverse=True,
-            replacement=False,
             classwise=False,
             classeq=True,
-            no_progress_bar=no_progress_bar,
-        )
-    elif sampling == "loss-rep":
-        return LossSampler(
-            dataset,
-            rng,
-            test_step_fn,
-            batch_size,
-            inverse=False,
-            replacement=True,
-            classwise=False,
-            classeq=False,
-            no_progress_bar=no_progress_bar,
-        )
-    elif sampling == "loss-inv-rep":
-        return LossSampler(
-            dataset,
-            rng,
-            test_step_fn,
-            batch_size,
-            inverse=True,
-            replacement=True,
-            classwise=False,
-            classeq=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm":
@@ -167,8 +145,8 @@ def get_sampler(
             rng,
             test_step_fn,
             batch_size,
+            replacement_stride=replacement_stride,
             inverse=False,
-            replacement=False,
             classwise=False,
             classeq=False,
             no_progress_bar=no_progress_bar,
@@ -179,8 +157,8 @@ def get_sampler(
             rng,
             test_step_fn,
             batch_size,
+            replacement_stride=replacement_stride,
             inverse=True,
-            replacement=False,
             classwise=False,
             classeq=False,
             no_progress_bar=no_progress_bar,
@@ -191,8 +169,8 @@ def get_sampler(
             rng,
             test_step_fn,
             batch_size,
+            replacement_stride=replacement_stride,
             inverse=False,
-            replacement=False,
             classwise=True,
             classeq=False,
             no_progress_bar=no_progress_bar,
@@ -203,8 +181,8 @@ def get_sampler(
             rng,
             test_step_fn,
             batch_size,
+            replacement_stride=replacement_stride,
             inverse=False,
-            replacement=False,
             classwise=False,
             classeq=True,
             no_progress_bar=no_progress_bar,
@@ -215,8 +193,8 @@ def get_sampler(
             rng,
             test_step_fn,
             batch_size,
+            replacement_stride=replacement_stride,
             inverse=True,
-            replacement=False,
             classwise=True,
             classeq=False,
             no_progress_bar=no_progress_bar,
@@ -227,34 +205,10 @@ def get_sampler(
             rng,
             test_step_fn,
             batch_size,
+            replacement_stride=replacement_stride,
             inverse=True,
-            replacement=False,
             classwise=False,
             classeq=True,
-            no_progress_bar=no_progress_bar,
-        )
-    elif sampling == "gradnorm-rep":
-        return GradnormSampler(
-            dataset,
-            rng,
-            test_step_fn,
-            batch_size,
-            inverse=False,
-            replacement=True,
-            classwise=False,
-            classeq=False,
-            no_progress_bar=no_progress_bar,
-        )
-    elif sampling == "gradnorm-inv-rep":
-        return GradnormSampler(
-            dataset,
-            rng,
-            test_step_fn,
-            batch_size,
-            inverse=True,
-            replacement=True,
-            classwise=False,
-            classeq=False,
             no_progress_bar=no_progress_bar,
         )
     else:
