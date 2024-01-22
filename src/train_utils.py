@@ -776,7 +776,7 @@ def test_epoch(
     elif uncertainty_quantification == "total":
         for ltk_batch_size, LTK_samples in LTK_samples_buffer.items():
             save_ltk(jnp.concatenate(LTK_samples, axis=1), n_steps, results_path, ltk_batch_size)
-        save_ltk(jnp.concatenate(LTK_total_buffer, axis=1), n_steps, results_path)
+        save_ltk(jnp.concatenate(LTK_total_buffer, axis=0), n_steps, results_path)
 
     # Compute final epoch statistics: Epoch loss, epoch accuracy (per class)
     loss = jnp.mean(jnp.concatenate(loss_epoch)).item()  # [1]
