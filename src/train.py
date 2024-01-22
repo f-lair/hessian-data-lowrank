@@ -124,12 +124,12 @@ def main() -> None:
         args.no_progress_bar,
     )
     ggn_total_sampler = get_sampler(
-        args.ggn_sampling,
+        "sequential",
         train_dataset,
-        args.rng_seed + 1,
+        args.rng_seed,
         test_step,
         args.train_batch_size,
-        1,
+        0,
         args.no_progress_bar,
     )
     train_dataloader = DataLoader(train_dataset, args.train_batch_size, train_sampler)
