@@ -260,6 +260,51 @@ def save_ltk(
         raise ValueError(f"Unsupported LTK dimensionality: {LTK.shape}")
 
 
+def save_predictive_distribution(
+    pred_distr: jax.Array,
+    step_idx: int,
+    results_path: str,
+    batch_size: int | None = None,
+) -> None:
+    """
+    Saves predictive distributions on disk.
+    C: Class dim.
+    N: Number of samples.
+    M: Number of test datapoints.
+
+    Args:
+        pred_distr(jax.Array): Total predictive distribution ([M, C]) or predictive distribution samples ([N, M, C]).
+        step_idx (int): Training step index.
+        results_path (str): Results path.
+        batch_size (int | None, optional): Batch size (only needed, if predictive distribution samples passed). Defaults to None.
+
+    Raises:
+        ValueError: No batch size passed for predictive distribution samples.
+        ValueError: Unsupported predictive distribution dimensionality.
+    """
+
+    # Create results dir, if not existing
+    os.makedirs(results_path, exist_ok=True)
+
+    # Total predictive distribution ([M, C])
+    if pred_distr.ndim == 2:
+        jnp.save(
+            str(Path(results_path, f"pred_distr_total_{step_idx}.npy")),
+            pred_distr,
+        )
+    # predictive distribution samples ([N, M, C])
+    elif pred_distr.ndim == 3:
+        if batch_size is None:
+            raise ValueError(f"Predictive distribution samples requires batch size argument.")
+
+        jnp.save(
+            str(Path(results_path, f"pred_distr_{batch_size}_batched_{step_idx}.npy")),
+            pred_distr,
+        )
+    else:
+        raise ValueError(f"Unsupported predictive distribution dimensionality: {pred_distr.shape}")
+
+
 def save_ggn(
     GGN: jax.Array,
     step_idx: int,
