@@ -367,11 +367,11 @@ def woodbury(
 
     U, C_inv, V = UCV
 
-    lu = C_inv + V @ A_inv @ U
-    lu = jsp.linalg.lu_factor(lu)
-    lu = jsp.linalg.lu_solve(lu, V)
+    cho = C_inv + V @ A_inv @ U
+    cho = jsp.linalg.cho_factor(cho)
+    cho = jsp.linalg.cho_solve(cho, V)
 
-    return A_inv - A_inv @ U @ lu @ A_inv, jnp.zeros((1,))
+    return A_inv - A_inv @ U @ cho @ A_inv, jnp.zeros((1,))
 
 
 @jax.jit
@@ -427,7 +427,7 @@ def compute_ltk(J_infer: jax.Array, GGN_inv: jax.Array) -> jax.Array:
     # LTK: -J_infer @ GGN_inv @ J_infer.T
 
     # Compute LTK as simple matrix product
-    return -jnp.einsum("mai,nij,mbj->nmab", J_infer, GGN_inv, J_infer)  # [N1, M, C, C]
+    return jnp.einsum("mai,nij,mbj->nmab", J_infer, GGN_inv, J_infer)  # [N1, M, C, C]
 
 
 @jax.jit
@@ -849,8 +849,8 @@ def test_epoch(
                         )  # [N1, N2, C, C]
                         N, _, _, D = J_model.shape
                         GGN_inv = jnp.broadcast_to(
-                            (-1 / l2_reg) * jnp.eye(D)[None, ...], (N, D, D)
-                        )  # [N1, D, D], do not forget the minus!
+                            (1 / l2_reg) * jnp.eye(D)[None, ...], (N, D, D)
+                        )  # [N1, D, D]
                         GGN_inv = compute_ggn_inv_vmap(J_model, H_loss, GGN_inv)  # [N1, D, D]
                     # Compute LTK and predictive distribution
                     LTK = compute_ltk(J_infer, GGN_inv)  # [N1, M, C, C]  # type: ignore
@@ -908,7 +908,7 @@ def test_epoch(
                     jnp.concatenate(H_loss_aggregation_buffer, axis=0), device
                 )  # [N2, C, C]
                 D = J_model.shape[2]
-                GGN_inv = (-1 / l2_reg) * jnp.eye(D)  # [D, D], do not forget the minus!
+                GGN_inv = (1 / l2_reg) * jnp.eye(D)  # [D, D]
                 GGN_inv = compute_ggn_inv(J_model, H_loss, GGN_inv)  # [D, D]
             # Compute LTK
             LTK = compute_ltk(J_infer, GGN_inv[None, ...])  # [1, M, C, C]  # type: ignore
