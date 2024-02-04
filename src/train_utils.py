@@ -907,7 +907,7 @@ def test_epoch(
                 H_loss = jax.device_put(
                     jnp.concatenate(H_loss_aggregation_buffer, axis=0), device
                 )  # [N2, C, C]
-                D = J_model.shape[3]
+                D = J_model.shape[2]
                 GGN_inv = (-1 / l2_reg) * jnp.eye(D)  # [D, D], do not forget the minus!
                 GGN_inv = compute_ggn_inv(J_model, H_loss, GGN_inv)  # [D, D]
             # Compute LTK
@@ -931,7 +931,9 @@ def test_epoch(
             )
     elif uncertainty_quantification == "total":
         save_ltk(jnp.concatenate(LTK_total_buffer, axis=0), n_steps, results_path)
-        save_ltk(jnp.concatenate(pred_distr_total_buffer, axis=0), n_steps, results_path)
+        save_predictive_distribution(
+            jnp.concatenate(pred_distr_total_buffer, axis=0), n_steps, results_path
+        )
 
     # Compute final epoch statistics: Epoch loss, epoch accuracy (per class)
     loss = jnp.mean(jnp.concatenate(loss_epoch)).item()  # [1]
