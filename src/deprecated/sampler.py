@@ -1,9 +1,7 @@
 import math
-import sys
+import time
 from functools import partial
 from typing import Callable, Dict, Iterator, Tuple
-
-sys.path.append("../")
 
 import jax
 import numpy as np
@@ -13,7 +11,7 @@ from torch import Generator
 from torch.utils import data
 from tqdm import tqdm
 
-from src.data_loader import DataLoader
+from data_loader import DataLoader
 
 
 class WeightedSampler(data.Sampler[int]):
@@ -278,7 +276,7 @@ class LossSampler(WeightedSampler):
             classeq,
             no_progress_bar,
         )
-        self.step_fn = jax.jit(partial(step_fn, n_classes=len(data_source.classes), l2_reg=0.0))  # type: ignore
+        self.step_fn = jax.jit(partial(step_fn, n_classes=len(data_source.classes)))  # type: ignore
 
     def _get_updated_weights(self, state: TrainState) -> torch.Tensor:
         """
@@ -343,7 +341,7 @@ class GradnormSampler(WeightedSampler):
             classeq,
             no_progress_bar,
         )
-        self.step_fn = jax.jit(partial(step_fn, n_classes=len(data_source.classes), l2_reg=0.0, return_grad=True))  # type: ignore
+        self.step_fn = jax.jit(partial(step_fn, n_classes=len(data_source.classes), return_grad=True))  # type: ignore
 
     def _get_updated_weights(self, state: TrainState) -> torch.Tensor:
         """

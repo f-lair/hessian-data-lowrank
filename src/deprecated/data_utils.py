@@ -1,7 +1,4 @@
-import sys
 from typing import Callable
-
-sys.path.append("../")
 
 import numpy as np
 import torch
@@ -10,7 +7,7 @@ from torch.utils import data
 from torchvision.datasets import MNIST
 from torchvision.transforms.v2.functional import resize
 
-from src.sampler import GradnormSampler, LossSampler
+from sampler import GradnormSampler, LossSampler
 
 
 def get_dataset(dataset: str, train: bool, px: int, path: str) -> data.Dataset:
