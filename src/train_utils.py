@@ -5,6 +5,7 @@ from typing import Any, Tuple
 sys.path.append("../")
 
 import jax
+import jax.flatten_util
 import optax
 from flax.core.frozen_dict import FrozenDict
 from flax.training import orbax_utils
@@ -64,13 +65,7 @@ def train_step(
         logits = state.apply_fn(params, x)  # [N, C]
         loss_unreduced = optax.softmax_cross_entropy_with_integer_labels(logits, y)  # [N]
         loss = jnp.mean(loss_unreduced)  # [1]
-        l2_penalty = (
-            l2_reg
-            / 2
-            * jnp.sum(
-                jnp.concatenate([x.ravel() * x.ravel() for x in tree_util.tree_leaves(params)])
-            )
-        )  # [1]
+        l2_penalty = l2_reg / 2 * jnp.sum(jax.flatten_util.ravel_pytree(params)[0] ** 2)  # [1]
         loss = loss + l2_penalty  # [1]
         return loss, (loss_unreduced, logits)  # type: ignore
 
@@ -150,13 +145,7 @@ def test_step(
 
         logits = state.apply_fn(params, x)  # [N, C]
         loss_unreduced = optax.softmax_cross_entropy_with_integer_labels(logits, y)  # [N]
-        l2_penalty = (
-            l2_reg
-            / 2
-            * jnp.sum(
-                jnp.concatenate([x.ravel() * x.ravel() for x in tree_util.tree_leaves(params)])
-            )
-        )  # [1]
+        l2_penalty = l2_reg / 2 * jnp.sum(jax.flatten_util.ravel_pytree(params)[0] ** 2)  # [1]
         loss_unreduced = loss_unreduced + l2_penalty  # [N]
         return loss_unreduced, (logits,)  # type: ignore
 
