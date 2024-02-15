@@ -1,7 +1,10 @@
+import pathlib
 import sys
 from typing import Callable
 
-sys.path.append("../")
+sys_path = str(pathlib.Path(__file__).parent.parent.resolve())
+if sys_path not in sys.path:
+    sys.path.append(sys_path)
 
 import numpy as np
 import torch

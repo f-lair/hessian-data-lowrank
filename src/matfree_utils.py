@@ -1,9 +1,12 @@
 import math
+import pathlib
 import sys
 from functools import partial
 from typing import Any, Callable, Tuple
 
-sys.path.append("../")
+sys_path = str(pathlib.Path(__file__).parent.parent.resolve())
+if sys_path not in sys.path:
+    sys.path.append(sys_path)
 
 import jax
 import jax.flatten_util

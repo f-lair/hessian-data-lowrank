@@ -1,9 +1,12 @@
+import pathlib
 import shutil
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
-sys.path.append("../")
+sys_path = str(pathlib.Path(__file__).parent.parent.resolve())
+if sys_path not in sys.path:
+    sys.path.append(sys_path)
 
 import jax
 import optax
