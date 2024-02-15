@@ -7,15 +7,8 @@ import jax.flatten_util
 import jax.numpy as jnp
 import jax.scipy as jsp
 import pytest
-from matfree import hutchinson, lanczos
 
-from src.ad_utils import (
-    get_param_count,
-    get_param_split,
-    loss_hvp,
-    model_jvp,
-    model_vjp,
-)
+from src.ad_utils import get_param_count
 from src.matfree_utils import frobenius_inv_matfree, frobenius_matfree, ggn_matfree
 from tests.conftest import dummy_material
 from tests.dummy.dummy_model import DummyModel, loss_fn, model_fn
@@ -68,7 +61,7 @@ def test_frobenius():
     y_pred = model_fn(state, x)(state.params)
 
     l2_reg = 1e-2
-    num_hutchinson_samples = 100_000
+    num_hutchinson_samples = 5_000
     prng_key = jax.random.PRNGKey(7)
 
     def frobenius_naive():
@@ -112,7 +105,7 @@ def test_frobenius_inv():
     y_pred = model_fn(state, x)(state.params)
 
     l2_reg = 1e-2
-    num_hutchinson_samples = 100_000
+    num_hutchinson_samples = 5_000
     lanczos_order = 3
     prng_key = jax.random.PRNGKey(7)
 

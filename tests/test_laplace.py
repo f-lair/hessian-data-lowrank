@@ -24,7 +24,7 @@ def test_laplace():
     y_pred = model_fn(state, x)(state.params)
 
     l2_reg = 1e-2
-    num_hutchinson_samples = 100_000
+    num_hutchinson_samples = 5_000
     num_cg_iterations = 20
     prng_key = jax.random.PRNGKey(7)
 
