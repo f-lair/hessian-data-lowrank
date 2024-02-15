@@ -116,7 +116,7 @@ def main() -> None:
     train_dataset = get_dataset(args.dataset, train=True, px=args.px, path=args.data_path)
     test_dataset = get_dataset(args.dataset, train=False, px=args.px, path=args.data_path)
     test_sampler = get_sampler(
-        "uniform",
+        "sequential",
         test_dataset,
         args.rng_seed,
         partial(test_step, l2_reg=args.l2_reg),
