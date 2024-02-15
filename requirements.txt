@@ -5,6 +5,7 @@ matfree==0.0.14
 matplotlib==3.8.0
 numpy==1.26.1
 optax==0.1.9
+orbax-checkpoint==0.5.3
 pandas==2.1.1
 pytest==8.0.0
 scipy==1.11.3
