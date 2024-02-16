@@ -43,8 +43,19 @@ def ggn_matfree(
 
     param_split = get_param_split(state)
 
-    num_iterations = int(math.ceil(num_data_samples / batch_size))
-    num_data_samples = min(num_iterations * batch_size, num_data_samples)
+    num_iterations = num_data_samples // batch_size
+    num_data_samples = num_iterations * batch_size
+
+    x_buffer, y_buffer = [], []
+
+    for idx, (x, y) in enumerate(data_loader):
+        if idx >= num_iterations:
+            break
+        x_buffer.append(x)
+        y_buffer.append(y)
+
+    x_buffer = jnp.concatenate(x_buffer, axis=0)
+    y_buffer = jnp.concatenate(y_buffer, axis=0)
 
     @jax.jit
     def _ggn_matfree(v: jax.Array) -> jax.Array:
@@ -52,7 +63,10 @@ def ggn_matfree(
         carry = l2_reg * v
 
         def __ggn_matfree(idx: int, carry: jax.Array) -> jax.Array:
-            x, y = next(data_iterator)
+            low = idx * batch_size
+            x = jax.lax.dynamic_slice_in_dim(x_buffer, low, batch_size)
+            y = jax.lax.dynamic_slice_in_dim(y_buffer, low, batch_size)
+
             N = x.shape[0]
             v_batched = jnp.broadcast_to(v[None, ...], (N,) + v.shape)
             y_pred, v_batched = model_jvp_batched(
@@ -102,8 +116,19 @@ def ggn_matfree_nd(
 
     param_split = get_param_split(state)
 
-    num_iterations = int(math.ceil(num_data_samples / batch_size))
-    num_data_samples = min(num_iterations * batch_size, num_data_samples)
+    num_iterations = num_data_samples // batch_size
+    num_data_samples = num_iterations * batch_size
+
+    x_buffer, y_buffer = [], []
+
+    for idx, (x, y) in enumerate(data_loader):
+        if idx >= num_iterations:
+            break
+        x_buffer.append(x)
+        y_buffer.append(y)
+
+    x_buffer = jnp.concatenate(x_buffer, axis=0)
+    y_buffer = jnp.concatenate(y_buffer, axis=0)
 
     @jax.jit
     def _ggn_matfree_nd(m: jax.Array) -> jax.Array:
@@ -112,7 +137,10 @@ def ggn_matfree_nd(
         carry = l2_reg * m
 
         def __ggn_matfree_nd(idx: int, carry: jax.Array) -> jax.Array:
-            x, y = next(data_iterator)
+            low = idx * batch_size
+            x = jax.lax.dynamic_slice_in_dim(x_buffer, low, batch_size)
+            y = jax.lax.dynamic_slice_in_dim(y_buffer, low, batch_size)
+
             N = x.shape[0]
             m_batched = jnp.broadcast_to(m[None, ...], (N,) + m.shape)  # [N, D, M]
             y_pred, m_batched = model_jmp_batched(
@@ -153,16 +181,31 @@ def ggn_matfree_pytree(
     loss_hvp_batched = jax.vmap(loss_hvp, in_axes=(0, 0, 0, None))
     model_vjp_batched = jax.vmap(model_vjp, in_axes=(None, 0, 0, None))
 
-    num_iterations = int(math.ceil(num_data_samples / batch_size))
-    num_data_samples = min(num_iterations * batch_size, num_data_samples)
+    num_iterations = num_data_samples // batch_size
+    num_data_samples = num_iterations * batch_size
+
+    x_buffer, y_buffer = [], []
+
+    for idx, (x, y) in enumerate(data_loader):
+        if idx >= num_iterations:
+            break
+        x_buffer.append(x)
+        y_buffer.append(y)
+
+    x_buffer = jnp.concatenate(x_buffer, axis=0)
+    y_buffer = jnp.concatenate(y_buffer, axis=0)
 
     @jax.jit
     def _ggn_matfree_pytree(v: Any) -> Any:
-        data_iterator = iter(data_loader)
+        # data_iterator = iter(data_loader)
         carry = jax.tree_util.tree_map(lambda _v_: l2_reg * _v_, v)
 
         def __ggn_matfree_pytree(idx: int, carry: Any) -> Any:
-            x, y = next(data_iterator)
+            # x, y = next(data_iterator)
+            low = idx * batch_size
+            x = jax.lax.dynamic_slice_in_dim(x_buffer, low, batch_size)
+            y = jax.lax.dynamic_slice_in_dim(y_buffer, low, batch_size)
+
             N = x.shape[0]
             v_batched = jax.tree_util.tree_map(
                 lambda _v_: jnp.broadcast_to(_v_[None, ...], (N,) + _v_.shape), v
