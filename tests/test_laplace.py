@@ -23,8 +23,8 @@ def test_laplace():
     x, y = next(iter(train_dataloader))
     y_pred = model_fn(state, x)(state.params)
 
-    l2_reg = 1e-2
-    num_hutchinson_samples = 5_000
+    l2_reg = 1e-3
+    num_hutchinson_samples = 2500
     num_cg_iterations = 20
     prng_key = jax.random.PRNGKey(7)
 
@@ -74,6 +74,6 @@ def test_laplace():
         laplace_naive()
     )
 
-    assert jnp.allclose(out_laplace_trace, out_laplace_trace_expected, rtol=1e1, atol=1e1)
+    assert jnp.allclose(out_laplace_trace, out_laplace_trace_expected, rtol=1e-1, atol=1e-1)
     assert jnp.allclose(out_laplace_diagonal, out_laplace_diagonal_expected, rtol=1e-1, atol=1e-1)
     assert jnp.allclose(out_laplace_logits, out_laplace_logits_expected)

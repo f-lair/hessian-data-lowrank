@@ -67,7 +67,7 @@ def main() -> None:
     parser.add_argument(
         "--num-hutchinson-samples",
         type=int,
-        default=10_000,
+        default=5_000,
         help="Number of samples used for Hutchinson estimator.",
     )
     parser.add_argument(
@@ -91,7 +91,7 @@ def main() -> None:
     parser.add_argument(
         "--num-laplace-samples",
         type=int,
-        default=100,
+        default=200,
         help="Number of test datapoints used for laplace experiment.",
     )
     parser.add_argument(

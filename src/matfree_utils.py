@@ -308,17 +308,10 @@ def eigen_matfree(
 
 def ltk_matfree(
     state: TrainState,
-    data_loader: DataLoader,
+    _ggn_matfree_pytree: Callable,
     model_fn: Callable,
-    loss_fn: Callable,
-    num_data_samples: int,
-    batch_size: int,
-    l2_reg: float,
     num_cg_iterations: int,
 ) -> Callable:
-    _ggn_matfree_pytree = ggn_matfree_pytree(
-        state, data_loader, model_fn, loss_fn, num_data_samples, batch_size, l2_reg
-    )
 
     @jax.jit
     def _ltk_matfree(x: jax.Array, v: jax.Array) -> jax.Array:
@@ -349,14 +342,14 @@ def laplace_matfree(
     v = jnp.empty((num_classes,))
     num_datapoints = len(test_data_loader.dataset)  # type: ignore
 
+    _ggn_matfree_pytree = ggn_matfree_pytree(
+        state, data_loader, model_fn, loss_fn, num_data_samples, batch_size, l2_reg
+    )
+
     _ltk_matfree = ltk_matfree(
         state,
-        data_loader,
+        _ggn_matfree_pytree,
         model_fn,
-        loss_fn,
-        num_data_samples,
-        batch_size,
-        l2_reg,
         num_cg_iterations,
     )
 
