@@ -302,7 +302,7 @@ def laplace_matfree(
     num_hutchinson_samples: int,
     prng_key: jax.Array,
     no_progress_bar: bool,
-) -> Tuple[jax.Array, jax.Array]:
+) -> Tuple[jax.Array, jax.Array, jax.Array]:
     v = jnp.empty((num_classes,))
     num_datapoints = len(test_data_loader.dataset)  # type: ignore
 
@@ -321,6 +321,7 @@ def laplace_matfree(
     prng_keys = jax.random.split(prng_key, (num_datapoints,))
     laplace_trace_results = []
     laplace_diagonal_results = []
+    laplace_logits_results = []
 
     for idx, (x, _) in enumerate(
         tqdm(test_data_loader, desc="Laplace", total=num_laplace_samples, disable=no_progress_bar)
@@ -331,10 +332,13 @@ def laplace_matfree(
             hutchinson.integrand_trace_and_diagonal(partial(_ltk_matfree, x[0])),
             sampler,
         )(prng_keys[idx])
+        laplace_logits_result = model_fn(state, x)(state.params)
         laplace_trace_results.append(laplace_result["trace"])
         laplace_diagonal_results.append(laplace_result["diagonal"])
+        laplace_logits_results.append(laplace_logits_result[0])
 
     laplace_trace_results = jnp.stack(laplace_trace_results, axis=0)
     laplace_diagonal_results = jnp.stack(laplace_diagonal_results, axis=0)
+    laplace_logits_results = jnp.stack(laplace_logits_results, axis=0)
 
-    return laplace_trace_results, laplace_diagonal_results
+    return laplace_trace_results, laplace_diagonal_results, laplace_logits_results

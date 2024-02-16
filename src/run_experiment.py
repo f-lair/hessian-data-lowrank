@@ -115,20 +115,12 @@ def main() -> None:
     # Load data
     train_dataset = get_dataset(args.dataset, train=True, px=args.px, path=args.data_path)
     test_dataset = get_dataset(args.dataset, train=False, px=args.px, path=args.data_path)
-    test_sampler = get_sampler(
-        "sequential",
-        test_dataset,
-        args.rng_seed,
-        partial(test_step, l2_reg=args.l2_reg),
-        1,
-        0,
-        args.no_progress_bar,
-    )
-    test_dataloader = DataLoader(test_dataset, 1, test_sampler)
 
     # Setup checkpointing
     checkpointer = PyTreeCheckpointer()
-    checkpoint_manager = CheckpointManager(args.checkpoint_path, checkpointer)
+    checkpoint_manager = CheckpointManager(
+        str(pathlib.Path(args.checkpoint_path).resolve()), checkpointer
+    )
 
     # Setup model
     model = get_model(args.dataset, args.hidden_dim)
@@ -170,7 +162,6 @@ def main() -> None:
         experiment_fn = partial(
             laplace_matfree,
             state=train_state,
-            test_data_loader=test_dataloader,
             model_fn=model_fn,
             loss_fn=loss_fn,
             l2_reg=args.l2_reg,
@@ -195,13 +186,32 @@ def main() -> None:
             0,
             args.no_progress_bar,
         )
-        train_dataloader = DataLoader(train_dataset, args.batch_size, train_sampler)
-        results = experiment_fn(
-            data_loader=train_dataloader,
-            batch_size=args.batch_size,
-            num_data_samples=sample_size,
-            prng_key=prng_key,
+        test_sampler = get_sampler(
+            "uniform",
+            test_dataset,
+            args.rng_seed,
+            partial(test_step, l2_reg=args.l2_reg),
+            1,
+            0,
+            args.no_progress_bar,
         )
+        train_dataloader = DataLoader(train_dataset, args.batch_size, train_sampler)
+        test_dataloader = DataLoader(test_dataset, 1, test_sampler)
+        if args.experiment == "laplace":
+            results = experiment_fn(
+                data_loader=train_dataloader,
+                test_data_loader=test_dataloader,  # type: ignore
+                batch_size=args.batch_size,
+                num_data_samples=sample_size,
+                prng_key=prng_key,
+            )
+        else:
+            results = experiment_fn(
+                data_loader=train_dataloader,
+                batch_size=args.batch_size,
+                num_data_samples=sample_size,
+                prng_key=prng_key,
+            )  # type: ignore
         save_experiment_results(
             results,
             args.experiment,
@@ -226,18 +236,37 @@ def main() -> None:
                 1,
                 args.no_progress_bar,
             )
+            test_sampler = get_sampler(
+                "uniform",
+                test_dataset,
+                args.rng_seed,
+                partial(test_step, l2_reg=args.l2_reg),
+                1,
+                0,
+                args.no_progress_bar,
+            )
 
             # Update weights, if WeightedSampler is used
             if isinstance(train_sampler, WeightedSampler) and sample_size == sample_sizes[0]:
                 train_sampler.update(train_state)
 
             train_dataloader = DataLoader(train_dataset, batch_size, train_sampler)
-            results = experiment_fn(
-                data_loader=train_dataloader,
-                batch_size=batch_size,
-                num_data_samples=sample_size,
-                prng_key=prng_key,
-            )
+            test_dataloader = DataLoader(test_dataset, 1, test_sampler)
+            if args.experiment == "laplace":
+                results = experiment_fn(
+                    data_loader=train_dataloader,
+                    test_data_loader=test_dataloader,  # type: ignore
+                    batch_size=batch_size,
+                    num_data_samples=sample_size,
+                    prng_key=prng_key,
+                )
+            else:
+                results = experiment_fn(
+                    data_loader=train_dataloader,
+                    batch_size=batch_size,
+                    num_data_samples=sample_size,
+                    prng_key=prng_key,
+                )  # type: ignore
             save_experiment_results(
                 results,
                 args.experiment,

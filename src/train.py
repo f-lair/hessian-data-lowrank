@@ -2,7 +2,6 @@ import pathlib
 import shutil
 import sys
 from argparse import ArgumentParser
-from pathlib import Path
 
 sys_path = str(pathlib.Path(__file__).parent.parent.resolve())
 if sys_path not in sys.path:
@@ -89,13 +88,15 @@ def main() -> None:
     train_state = TrainState.create(apply_fn=model.apply, params=params, tx=tx)
 
     # Setup checkpointing
-    if Path(args.checkpoint_path).exists():
+    if pathlib.Path(args.checkpoint_path).exists():
         shutil.rmtree(args.checkpoint_path)
     checkpointer = PyTreeCheckpointer()
     checkpoint_options = CheckpointManagerOptions(
         save_interval_steps=args.checkpoint_interval, create=True
     )
-    checkpoint_manager = CheckpointManager(args.checkpoint_path, checkpointer, checkpoint_options)
+    checkpoint_manager = CheckpointManager(
+        str(pathlib.Path(args.checkpoint_path).resolve()), checkpointer, checkpoint_options
+    )
 
     pbar_stats = {"loss": 0.0, "acc": 0.0, "test-loss": 0.0, "test-acc": 0.0}
     pbar = trange(args.epochs, desc="Epoch", disable=args.no_progress_bar, postfix=pbar_stats)

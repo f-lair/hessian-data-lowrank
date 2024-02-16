@@ -95,3 +95,14 @@ def save_experiment_results(
             ),
             results[1],
         )
+        jnp.save(
+            str(
+                Path(
+                    checkpoint_path,
+                    str(checkpoint_step),
+                    sampling,
+                    f"laplace_logits_{sample_size}_{checkpoint_step}.npy",
+                )
+            ),
+            results[2],
+        )

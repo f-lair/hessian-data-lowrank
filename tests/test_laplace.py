@@ -29,6 +29,7 @@ def test_laplace():
     prng_key = jax.random.PRNGKey(7)
 
     def laplace_naive():
+        logits = model_fn(state, x)(state.params)
         J = jax.jacrev(model_fn(state, x))(state.params)
         J = jnp.concatenate(
             [x.reshape(x.shape[0], num_classes, -1) for x in jax.tree_util.tree_leaves(J)],
@@ -47,9 +48,13 @@ def test_laplace():
         )  # [N, D, C]
         LTK = jnp.einsum("ijk,ikl->ijl", J, LTK)  # [N, C, C]
 
-        return jnp.einsum("ijj->i", LTK), jnp.diagonal(LTK, axis1=1, axis2=2)  # [N], [N, C]
+        return (
+            jnp.einsum("ijj->i", LTK),
+            jnp.diagonal(LTK, axis1=1, axis2=2),
+            logits,
+        )  # [N], [N, C], [N, C]
 
-    out_laplace_trace, out_laplace_diagonal = laplace_matfree(
+    out_laplace_trace, out_laplace_diagonal, out_laplace_logits = laplace_matfree(
         state,
         train_dataloader,
         test_dataloader,
@@ -65,7 +70,10 @@ def test_laplace():
         prng_key,
         True,
     )
-    out_laplace_trace_expected, out_laplace_diagonal_expected = laplace_naive()
+    out_laplace_trace_expected, out_laplace_diagonal_expected, out_laplace_logits_expected = (
+        laplace_naive()
+    )
 
     assert jnp.allclose(out_laplace_trace, out_laplace_trace_expected, rtol=1e1, atol=1e1)
     assert jnp.allclose(out_laplace_diagonal, out_laplace_diagonal_expected, rtol=1e-1, atol=1e-1)
+    assert jnp.allclose(out_laplace_logits, out_laplace_logits_expected)
