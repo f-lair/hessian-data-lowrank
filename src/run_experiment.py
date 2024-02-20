@@ -247,7 +247,7 @@ def main() -> None:
             )
 
             # Update weights, if WeightedSampler is used
-            if isinstance(train_sampler, WeightedSampler) and sample_size == sample_sizes[0]:
+            if isinstance(train_sampler, WeightedSampler):
                 train_sampler.update(train_state)
 
             train_dataloader = DataLoader(train_dataset, batch_size, train_sampler)
