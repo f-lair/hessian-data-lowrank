@@ -1,3 +1,4 @@
+import copy
 import pathlib
 import sys
 from argparse import ArgumentParser
@@ -225,17 +226,25 @@ def main() -> None:
             2**exp for exp in range(args.sample_size_min_exp, args.sample_size_max_exp + 1)
         ]
 
+        train_sampler = get_sampler(
+            args.sampling,
+            train_dataset,
+            args.rng_seed,
+            test_step,
+            args.batch_size,
+            1,
+            args.no_progress_bar,
+        )
+        # Update weights, if WeightedSampler is used
+        if isinstance(train_sampler, WeightedSampler):
+            train_sampler.update(train_state)
+        train_samplers = {
+            sample_size: copy.deepcopy(train_sampler) for sample_size in sample_sizes
+        }
+
         for sample_size in tqdm(sample_sizes, desc="Experiment", disable=args.no_progress_bar):
             batch_size = min(args.batch_size, sample_size)
-            train_sampler = get_sampler(
-                args.sampling,
-                train_dataset,
-                args.rng_seed,
-                test_step,
-                args.batch_size,
-                1,
-                args.no_progress_bar,
-            )
+
             test_sampler = get_sampler(
                 "uniform",
                 test_dataset,
@@ -246,11 +255,7 @@ def main() -> None:
                 args.no_progress_bar,
             )
 
-            # Update weights, if WeightedSampler is used
-            if isinstance(train_sampler, WeightedSampler):
-                train_sampler.update(train_state)
-
-            train_dataloader = DataLoader(train_dataset, batch_size, train_sampler)
+            train_dataloader = DataLoader(train_dataset, batch_size, train_samplers[sample_size])
             test_dataloader = DataLoader(test_dataset, 1, test_sampler)
             if args.experiment == "laplace":
                 results = experiment_fn(
