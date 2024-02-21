@@ -1,4 +1,3 @@
-import copy
 import pathlib
 import sys
 from argparse import ArgumentParser
@@ -239,12 +238,23 @@ def main() -> None:
         if isinstance(train_sampler, WeightedSampler):
             train_sampler.update(train_state)
         train_samplers = {
-            sample_size: copy.deepcopy(train_sampler) for sample_size in sample_sizes
+            sample_size: get_sampler(
+                args.sampling,
+                train_dataset,
+                args.rng_seed,
+                test_step,
+                args.batch_size,
+                1,
+                args.no_progress_bar,
+            )
+            for sample_size in sample_sizes
         }
 
         for sample_size in tqdm(sample_sizes, desc="Experiment", disable=args.no_progress_bar):
             batch_size = min(args.batch_size, sample_size)
 
+            if isinstance(train_sampler, WeightedSampler):
+                train_samplers[sample_size].weights = train_sampler.weights  # type: ignore
             test_sampler = get_sampler(
                 "uniform",
                 test_dataset,
