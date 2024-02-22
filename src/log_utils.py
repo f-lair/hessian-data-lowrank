@@ -33,7 +33,7 @@ def get_save_measure(measure: str, num_classes: int, compose_on_cpu: bool) -> Ca
 def save_f_norm(
     GGN_1: jax.Array,
     GGN_2: jax.Array,
-    prng_key: jax.random.KeyArray,
+    prng_key: jax.Array,
     step_idx: int,
     results_path: str,
     batch_size: int,
@@ -63,7 +63,7 @@ def save_f_norm(
 
 
 def compute_topc_eigenspace_overlap(
-    GGN_1: jax.Array, GGN_2: jax.Array, prng_key: jax.random.KeyArray, num_classes: int
+    GGN_1: jax.Array, GGN_2: jax.Array, prng_key: jax.Array, num_classes: int
 ) -> jax.Array:
     D, _ = GGN_1.shape
 
@@ -96,7 +96,7 @@ def compute_topc_eigenspace_overlap(
 
 
 def compute_eigh_lobpcg_overlap(
-    GGN: jax.Array, prng_key: jax.random.KeyArray, num_classes: int
+    GGN: jax.Array, prng_key: jax.Array, num_classes: int
 ) -> Tuple[jax.Array, jax.Array]:
     D, _ = GGN.shape
 
@@ -124,7 +124,7 @@ def compute_eigh_lobpcg_overlap(
 def save_topc_eigenspace_overlap(
     GGN_1: jax.Array,
     GGN_2: jax.Array,
-    prng_key: jax.random.KeyArray,
+    prng_key: jax.Array,
     step_idx: int,
     results_path: str,
     batch_size: int,
@@ -169,7 +169,7 @@ def save_topc_eigenspace_overlap(
 
 def save_eigh_lobpcg_overlap(
     GGN: jax.Array,
-    prng_key: jax.random.KeyArray,
+    prng_key: jax.Array,
     step_idx: int,
     results_path: str,
     num_classes: int,

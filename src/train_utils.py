@@ -463,7 +463,7 @@ def train_epoch(
     ggn_freq: int,
     n_ggn_iterations: int,
     n_steps: int,
-    prng_key: jax.random.KeyArray,
+    prng_key: jax.Array,
     save_measure: Callable,
     measure_saving: str,
     ggn_saving: str,
@@ -484,7 +484,7 @@ def train_epoch(
         ggn_freq (int): Frequency of GGN iterations.
         n_ggn_iterations (int): Number of GGN iterations.
         n_steps (int): Current number of completed training step across epochs.
-        prng_key (jax.random.KeyArray): Random key.
+        prng_key (jax.Array): Random key.
         save_measure (Callable): GGN error measure: GGN_1 [N_1, D, D], GGN_2 [N_2, D, D] -> measure [N_1, N_2] saved on disk.
         measure_saving (str): GGN error measure saving: disabled, total, next, last.
         ggn_saving (str): GGN saving: disabled, dense.
@@ -736,7 +736,7 @@ def test_epoch(
     ltk_batch_sizes: List[int],
     uncertainty_quantification: str,
     n_steps: int,
-    prng_key: jax.random.KeyArray,
+    prng_key: jax.Array,
     no_progress_bar: bool,
     results_path: str,
 ) -> Tuple[float, float, jax.Array]:
@@ -752,7 +752,7 @@ def test_epoch(
         ltk_batch_sizes (List[int]): Batch sizes for which LTKs will be saved.
         uncertainty_quantification (str): Whether uncertainty is computed using Laplace Approximation (disabled, sampled, total).
         n_steps (int): Current number of completed training steps across epochs.
-        prng_key (jax.random.KeyArray): Random key.
+        prng_key (jax.Array): Random key.
         no_progress_bar (bool): Disables progress bar.
         results_path (str): Results path.
 
