@@ -743,6 +743,7 @@ def test_epoch(
         GGN_counter = 0  # Number of already computed per-item GGNs (for running average)
         GGN_total = None  # Total GGN, encompassing all per-item GGNs across the dataset
         GGN_samples = None  # GGN samples, aggregated over one/multiple data batches
+        GGN_inv = None  # GGN inverse
 
         # LTK buffers when iterating over test dataset
         LTK_samples_buffer = {ltk_batch_size: [] for ltk_batch_size in ltk_batch_sizes}
@@ -780,8 +781,9 @@ def test_epoch(
 
                 # Save GGN samples
                 if ltk_batch_size_idx + 1 <= len(ltk_batch_sizes):
+                    GGN_inv = compute_ggn_inv_jit(GGN_samples)  # [N, D, D]
                     save_ggn(
-                        GGN_samples,
+                        GGN_inv,
                         n_steps,
                         results_path,
                         batch_size=aggregated_batch_size,
@@ -790,6 +792,7 @@ def test_epoch(
                 # Last GGN samples: Stop further GGN computations
                 if ltk_batch_size_idx + 1 == len(ltk_batch_sizes):
                     GGN_samples = None
+                    GGN_inv = None
                     break
 
         for ltk_batch in tqdm(
@@ -810,6 +813,7 @@ def test_epoch(
                 GGN_total = jnp.mean(GGN, axis=0)  # [D, D]
             else:
                 GGN_total = aggregate_ggn_total_jit(GGN_total, GGN, GGN_counter)  # [D, D]
+        GGN_total = compute_ggn_inv_jit(GGN_total[None, :, :])  # type: ignore [1, D, D]
         GGN_total = jax.device_put(GGN_total, jax.devices('cpu')[0])
 
     # Start epoch
@@ -848,7 +852,6 @@ def test_epoch(
                         n_steps, results_path, batch_size=ltk_batch_size
                     )  # [N, D, D]
                     GGN_inv = jax.device_put(GGN_inv, device)  # [N, D, D]
-                    GGN_inv = compute_ggn_inv_jit(GGN_inv)  # [N, D, D]
 
                     # Compute LTK and predictive distribution
                     LTK = compute_ltk(J_infer, GGN_inv)  # [N1, M, C, C]  # type: ignore
@@ -860,11 +863,8 @@ def test_epoch(
                         pred_distr.copy()
                     )  # [N1, M, C]
 
-                # Compute LTK for total GGN
-                GGN_inv = jax.device_put(GGN_total, device)[None, :, :]  # [1, D, D]
-                GGN_inv = compute_ggn_inv_jit(GGN_inv)  # [1, D, D]
-
-                # Compute LTK and predictive distribution
+                # Compute LTK and predictive distribution for total GGN
+                GGN_inv = jax.device_put(GGN_total, device)  # [1, D, D]
                 LTK = compute_ltk(J_infer, GGN_inv)  # [N1, M, C, C]  # type: ignore
                 pred_distr = compute_predictive_distribution(y_infer, LTK)  # [N1, M, C]
                 LTK = jax.device_put(LTK, device_cpu)[0]  # [M, C, C]
