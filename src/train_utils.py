@@ -779,7 +779,7 @@ def test_epoch(
                 ltk_batch_size_idx = ltk_batch_sizes.index(aggregated_batch_size)
 
                 # Save GGN samples
-                if ltk_batch_size_idx + 1 < len(ltk_batch_sizes):
+                if ltk_batch_size_idx + 1 <= len(ltk_batch_sizes):
                     save_ggn(
                         GGN_samples,
                         n_steps,
@@ -873,9 +873,11 @@ def test_epoch(
                 pred_distr_total_buffer.append(pred_distr.copy())  # [M, C]
 
     # Save LTK and predictive distribution results on disk, if computed
+    # Additionally, remove GGNs from disk
     if uncertainty_quantification:
         for ltk_batch_size, LTK_samples in LTK_samples_buffer.items():
             save_ltk(jnp.concatenate(LTK_samples, axis=1), n_steps, results_path, ltk_batch_size)
+            remove_ggn(n_steps, results_path, batch_size=ltk_batch_size)
         for pred_distr_batch_size, pred_distr_samples in pred_distr_samples_buffer.items():
             save_predictive_distribution(
                 jnp.concatenate(pred_distr_samples, axis=1),
