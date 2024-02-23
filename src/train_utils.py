@@ -29,7 +29,6 @@ def train_step(
     state: TrainState,
     batch: Tuple[jax.Array, jax.Array],
     n_classes: int,
-    l2_reg: float,
 ) -> Tuple[TrainState, jax.Array, jax.Array, jax.Array]:
     """
     Performs a single training step without GGN computation.
@@ -41,7 +40,6 @@ def train_step(
         state (TrainState): Current training state.
         batch (Tuple[jax.Array, jax.Array]): Batched input data.
         n_classes (int): Number of classes (equal to C).
-        l2_reg (float): L2 regularizer weighting.
 
     Returns:
         Tuple[TrainState, jax.Array, jax.Array, jax.Array]:
@@ -72,14 +70,7 @@ def train_step(
         logits = state.apply_fn(params, x)  # [N, C]
         loss_unreduced = optax.softmax_cross_entropy_with_integer_labels(logits, y)  # [N]
         loss = jnp.mean(loss_unreduced)  # [1]
-        l2_penalty = (
-            l2_reg
-            / 2
-            * jnp.sum(
-                jnp.concatenate([x.ravel() * x.ravel() for x in tree_util.tree_leaves(params)])
-            )
-        )  # [1]
-        loss = loss + l2_penalty  # [1]
+        loss = loss  # [1]
         return loss, (loss_unreduced, logits)  # type: ignore
 
     # Retrieve data
@@ -115,7 +106,6 @@ def test_step(
         jax.Array,
     ],
     n_classes: int,
-    l2_reg: float,
     return_grad: bool = False,
 ) -> Tuple[jax.Array, jax.Array, jax.Array] | Tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     """
@@ -128,7 +118,6 @@ def test_step(
         state (TrainState): Current training state.
         batch (Tuple[jax.Array, jax.Array]): Batched input data.
         n_classes (int): Number of classes (equal to C).
-        l2_reg (float): L2 regularizer weighting.
         return_grad (bool, optional): Whether to return loss gradients. Defaults to False.
 
     Returns:
@@ -158,14 +147,7 @@ def test_step(
 
         logits = state.apply_fn(params, x)  # [N, C]
         loss_unreduced = optax.softmax_cross_entropy_with_integer_labels(logits, y)  # [N]
-        l2_penalty = (
-            l2_reg
-            / 2
-            * jnp.sum(
-                jnp.concatenate([x.ravel() * x.ravel() for x in tree_util.tree_leaves(params)])
-            )
-        )  # [1]
-        loss_unreduced = loss_unreduced + l2_penalty  # [N]
+        loss_unreduced = loss_unreduced  # [N]
         return loss_unreduced, (logits,)  # type: ignore
 
     # Retrieve data
@@ -281,7 +263,7 @@ def compute_ggn_decomp(
     return logits, J_model, H_loss
 
 
-def compute_ggn(J_model: jax.Array, H_loss: jax.Array, l2_reg: float) -> jax.Array:
+def compute_ggn(J_model: jax.Array, H_loss: jax.Array, prior_precision: float) -> jax.Array:
     """
     Computes GGN realization as product of Jacobians and Hessian.
     C: Model output dim.
@@ -291,18 +273,18 @@ def compute_ggn(J_model: jax.Array, H_loss: jax.Array, l2_reg: float) -> jax.Arr
     Args:
         J_model (jax.Array): Per-item J_model ([N, C, D]).
         H_loss (jax.Array): Per-item H_loss ([N, C, C]).
-        l2_reg (float): L2 regularizer weighting.
+        prior_precision (float). Prior precision for GGN computation.
 
     Returns:
         jax.Array: Per-item GGN ([N, D, D]).
     """
 
-    # Realize L2 prior as diagonal matrix
-    D = J_model.shape[2]
-    L2_prior = -l2_reg * jnp.eye(D)  # do not forget the minus!
-
-    # Compute per-item Generalized Gauss-Newton (GGN) matrix: J_model.T @ H_loss @ J_model + L2_prior
-    return jnp.einsum("nax,nab,nby->nxy", J_model, H_loss, J_model) + L2_prior  # [N, D, D]
+    # Compute per-item Generalized Gauss-Newton (GGN) matrix: J_model.T @ H_loss @ J_model
+    D = J_model.shape[-1]
+    return (
+        jnp.einsum("nax,nab,nby->nxy", J_model, H_loss, J_model)
+        + prior_precision * jnp.eye(D)[None, ...]
+    )  # [N, D, D]
 
 
 def aggregate_samples(
@@ -348,62 +330,23 @@ def aggregate_samples_total(
     )  # [...]
 
 
-def woodbury(
-    A_inv: jax.Array, UCV: Tuple[jax.Array, jax.Array, jax.Array]
-) -> Tuple[jax.Array, jax.Array]:
+def compute_ggn_inv(GGN: jax.Array) -> jax.Array:
     """
-    Computes the inverse of the product U @ (C_inv)^(-1) @ V + (A_inv)^(-1) efficiently using the Woodbury matrix identity.
-
-    Args:
-        A_inv (jax.Array): Inverse small matrix ([B, B]).
-        UCV (Tuple[jax.Array, jax.Array, jax.Array]):
-            U (jax.Array): Tall matrix ([A, B]).
-            C_inv (jax.Array): Inverse small matrix ([B, B]).
-            V (jax.Array): Wide matrix ([B, A]).
-
-    Returns:
-        Tuple[jax.Array, jax.Array]: Inverse large matrix ([A, A]), dummy output needed for scan compatibility ([1]).
-    """
-
-    U, C_inv, V = UCV
-
-    cho = C_inv + V @ A_inv @ U
-    cho = jsp.linalg.cho_factor(cho)
-    cho = jsp.linalg.cho_solve(cho, V)
-
-    return A_inv - A_inv @ U @ cho @ A_inv, jnp.zeros((1,))
-
-
-@jax.jit
-def compute_ggn_inv(J_model: jax.Array, H_loss: jax.Array, GGN_inv: jax.Array) -> jax.Array:
-    """
-    Updates inverse of GGN.
+    Computes inverse of GGN via eigendecomposition.
     C: Model output dim.
     D: Parameter dim.
     N: Batch dim.
 
     Args:
-        J_model (jax.Array): Per-item J_model ([N, C, D]).
-        H_loss (jax.Array): Per-item H_loss ([N, C, C])
-        GGN_inv: Prior for inverse GGN ([D, D])
+        GGN: GGN matrix ([D, D])
 
     Returns:
-        jax.Array: Updated GGN inverse ([D, D]).
+        jax.Array: GGN inverse matrix ([D, D]).
     """
 
-    # @jax.vmap
-    # def vmap_scan(f, init, xs):
-    #     return jax.lax.scan(f, init, xs)
+    eigval, eigvec = jsp.linalg.eigh(GGN)
 
-    # Compute GGN inverse using recursive application of the woodbury matrix identity
-    # Can be implemented efficiently using a scan-op, initialized by GGN inverse prior and scanning over (J_model, H_loss) pairs
-    # Scale H_loss_inv by N beforehand to account for averaging
-    N = J_model.shape[0]
-    GGN_inv, _ = jax.lax.scan(
-        woodbury, GGN_inv, (J_model.transpose((0, 2, 1)), N * jnp.linalg.inv(H_loss), J_model)
-    )  # [D, D]
-
-    return GGN_inv
+    return eigvec @ jnp.diag(1 / eigval) @ eigvec.T
 
 
 @jax.jit
@@ -456,7 +399,7 @@ def compute_predictive_distribution(y_infer: jax.Array, LTK: jax.Array) -> jax.A
 def train_epoch(
     state: TrainState,
     train_dataloader: DataLoader,
-    l2_reg: float,
+    prior_precision: float,
     ggn_dataloader: DataLoader,
     ggn_total_dataloader: DataLoader,
     ggn_batch_sizes: List[int],
@@ -464,6 +407,7 @@ def train_epoch(
     n_ggn_iterations: int,
     n_steps: int,
     prng_key: jax.Array,
+    measure: str,
     save_measure: Callable,
     measure_saving: str,
     ggn_saving: str,
@@ -477,7 +421,7 @@ def train_epoch(
     Args:
         state (TrainState): Current training state.
         train_dataloader (DataLoader): Data loader for model training.
-        l2_reg (float): L2 regularizer weighting.
+        prior_precision (float): Prior precision for GGN.
         ggn_dataloader (DataLoader): Data loader for GGN samples computation.
         ggn_total_dataloader (DataLoader): Data loader for total GGN computation.
         ggn_batch_sizes (List[int]): Batch sizes for which GGNs will be saved.
@@ -485,6 +429,7 @@ def train_epoch(
         n_ggn_iterations (int): Number of GGN iterations.
         n_steps (int): Current number of completed training step across epochs.
         prng_key (jax.Array): Random key.
+        measure (str): GGN error measure name.
         save_measure (Callable): GGN error measure: GGN_1 [N_1, D, D], GGN_2 [N_2, D, D] -> measure [N_1, N_2] saved on disk.
         measure_saving (str): GGN error measure saving: disabled, total, next, last.
         ggn_saving (str): GGN saving: disabled, dense.
@@ -505,11 +450,11 @@ def train_epoch(
     ggn_computations_disabled = ggn_saving == "disabled" and measure_saving == "disabled"
 
     n_classes = len(train_dataloader.dataset.classes)  # type: ignore
-    train_step_jit = jax.jit(partial(train_step, n_classes=n_classes, l2_reg=l2_reg))
+    train_step_jit = jax.jit(partial(train_step, n_classes=n_classes))
 
     # Compute GGN realization on CPU, if needed
     device = jax.devices("cpu")[0] if compose_on_cpu else None
-    compute_ggn_jit = jax.jit(partial(compute_ggn, l2_reg=l2_reg), device=device)
+    compute_ggn_jit = jax.jit(partial(compute_ggn, prior_precision=prior_precision), device=device)
     aggregate_ggn_jit = jax.jit(aggregate_samples, device=device)
     aggregate_ggn_total_jit = jax.jit(aggregate_samples_total, device=device)
 
@@ -672,10 +617,15 @@ def train_epoch(
 
                     # Norm-saving "total": Compute norm
                     if measure_saving == "total":
+                        compute_ggn_inv_vmap = jax.vmap(compute_ggn_inv)
+                        if measure == "frobenius-inv":
+                            GGN_total = compute_ggn_inv(GGN_total)  # type: ignore
                         for ggn_batch_size in ggn_batch_sizes:
                             GGN_samples = load_ggn(
                                 n_steps, results_path, batch_size=ggn_batch_size
                             )
+                            if measure == "frobenius-inv":
+                                GGN_samples = compute_ggn_inv_vmap(GGN_samples)
                             save_measure(
                                 GGN_samples,
                                 GGN_total,  # type: ignore
@@ -685,20 +635,20 @@ def train_epoch(
                                 ggn_batch_size,
                             )
                             # LOBPCG-EIGH
-                            save_eigh_lobpcg_overlap(
-                                GGN_samples,
-                                prng_key,
-                                n_steps,
-                                results_path,
-                                10,
-                                compose_on_cpu,
-                                batch_size=ggn_batch_size,
-                            )
+                            # save_eigh_lobpcg_overlap(
+                            #     GGN_samples,
+                            #     prng_key,
+                            #     n_steps,
+                            #     results_path,
+                            #     10,
+                            #     compose_on_cpu,
+                            #     batch_size=ggn_batch_size,
+                            # )
                             # GGN-saving "disabled" : Remove batched GGN samples
                             if ggn_saving == "disabled":
                                 remove_ggn(n_steps, results_path, batch_size=ggn_batch_size)
                         # LOBPCG-EIGH
-                        save_eigh_lobpcg_overlap(GGN_total, prng_key, n_steps, results_path, 10, compose_on_cpu)  # type: ignore
+                        # save_eigh_lobpcg_overlap(GGN_total, prng_key, n_steps, results_path, 10, compose_on_cpu)  # type: ignore
 
             # Perform training step
             state, loss, n_correct_per_class, n_per_class = train_step_jit(
@@ -730,13 +680,14 @@ def train_epoch(
 def test_epoch(
     state: TrainState,
     test_dataloader: DataLoader,
-    l2_reg: float,
+    prior_precision: float,
     ltk_dataloader: DataLoader,
     ltk_total_dataloader: DataLoader,
     ltk_batch_sizes: List[int],
-    uncertainty_quantification: str,
+    uncertainty_quantification: bool,
     n_steps: int,
     prng_key: jax.Array,
+    compose_on_cpu: bool,
     no_progress_bar: bool,
     results_path: str,
 ) -> Tuple[float, float, jax.Array]:
@@ -746,13 +697,14 @@ def test_epoch(
     Args:
         state (TrainState): Current training state.
         test_dataloader (DataLoader): Data loader for model training.
-        l2_reg (float): L2 regularizer weighting.
+        prior_precision (float): Prior precision for GGN computation.
         ltk_dataloader (DataLoader): Data loader for LTK samples computation.
         ltk_total_dataloader (DataLoader): Data loader for total LTK computation.
         ltk_batch_sizes (List[int]): Batch sizes for which LTKs will be saved.
-        uncertainty_quantification (str): Whether uncertainty is computed using Laplace Approximation (disabled, sampled, total).
+        uncertainty_quantification (bool): Whether uncertainty is computed using Laplace Approximation.
         n_steps (int): Current number of completed training steps across epochs.
         prng_key (jax.Array): Random key.
+        compose_on_cpu (bool): Computes GGN realization on CPU instead of GPU (might exceed GPU memory otherwise).
         no_progress_bar (bool): Disables progress bar.
         results_path (str): Results path.
 
@@ -764,18 +716,7 @@ def test_epoch(
     """
 
     n_classes = len(test_dataloader.dataset.classes)  # type: ignore
-    test_step_jit = jax.jit(partial(test_step, n_classes=n_classes, l2_reg=l2_reg))
-
-    # LTK buffers when iterating over test dataset
-    device = jax.devices(jax.default_backend())[0]
-    device_cpu = jax.devices("cpu")[0]
-    J_model_aggregation_buffer = []
-    H_loss_aggregation_buffer = []
-    GGN_inv = None
-    LTK_samples_buffer = {ltk_batch_size: [] for ltk_batch_size in ltk_batch_sizes}
-    LTK_total_buffer = []
-    pred_distr_samples_buffer = {ltk_batch_size: [] for ltk_batch_size in ltk_batch_sizes}
-    pred_distr_total_buffer = []
+    test_step_jit = jax.jit(partial(test_step, n_classes=n_classes))
 
     # Running statistics
     loss_epoch = []  # Per-item losses per test steps
@@ -783,75 +724,132 @@ def test_epoch(
     n_correct_per_class_epoch = jnp.zeros((n_classes,), dtype=int)
     n_per_class_epoch = jnp.zeros_like(n_correct_per_class_epoch)
 
-    # Update weights for UQ, if WeightedSampler is used
-    if uncertainty_quantification != "disabled":
+    if uncertainty_quantification:
+        # Update weights for UQ, if WeightedSampler is used
         if isinstance(ltk_dataloader.sampler, WeightedSampler):
             ltk_dataloader.sampler.update(state)
 
-    # Iterate over dataset to compute LTK samples
-    continue_LTK_computation = uncertainty_quantification == "sampled"
-    compute_ggn_inv_vmap = jax.vmap(compute_ggn_inv)
-    for ltk_step_idx, ltk_batch in enumerate(
-        tqdm(
-            ltk_dataloader,
-            desc="LTK-sample-step",
-            disable=no_progress_bar or not continue_LTK_computation,
+        # Compute GGN realization on CPU, if needed
+        device = jax.devices("cpu")[0] if compose_on_cpu else None
+        device_cpu = jax.devices("cpu")[0]
+        compute_ggn_jit = jax.jit(
+            partial(compute_ggn, prior_precision=prior_precision), device=device
         )
-    ):
-        # Aggregate J_model, H_loss via concatenation
-        if continue_LTK_computation:
-            _, J_model, H_loss = compute_ggn_decomp(state, ltk_batch)  # [N, C, D], [N, C, C]
-            J_model = jax.device_put(J_model, device_cpu)
-            H_loss = jax.device_put(H_loss, device_cpu)
-            J_model_aggregation_buffer.append(J_model.copy())
-            H_loss_aggregation_buffer.append(H_loss.copy())
+        aggregate_ggn_jit = jax.jit(aggregate_samples, device=device)
+        aggregate_ggn_total_jit = jax.jit(aggregate_samples_total, device=device)
+        compute_ggn_inv_jit = jax.vmap(jax.jit(compute_ggn_inv, device=device))
 
-        # Start epoch
-        pbar_stats = {"loss": 0.0, "acc": 0.0}
-        with tqdm(
-            total=len(test_dataloader),
-            desc="Test-step",
-            disable=no_progress_bar or ltk_step_idx > 0,
-            postfix=pbar_stats,
-        ) as pbar:
-            # Iterate over dataset for testing
-            for batch_idx, batch in enumerate(test_dataloader):
-                # Perform test steps only once
-                if ltk_step_idx == 0:
-                    loss, n_correct_per_class, n_per_class = test_step_jit(state, batch)
-                    # Update running statistics
-                    loss_epoch.append(loss)
-                    n_correct_per_class_epoch = n_correct_per_class_epoch + n_correct_per_class
-                    n_per_class_epoch = n_per_class_epoch + n_per_class
-                    n_correct = n_correct_per_class.sum()
-                    n_correct_epoch += n_correct
-                    N = batch[0].shape[0]
-                    # Update progress bar
-                    pbar.update()
-                    pbar_stats["loss"] = round(float(jnp.mean(loss)), 6)
-                    pbar_stats["acc"] = round(n_correct / N, 4)
-                    pbar.set_postfix(pbar_stats)
-                # Compute uncertainty, if needed
-                if not continue_LTK_computation:
+        # Init running statistics for this GGN iteration
+        GGN_counter = 0  # Number of already computed per-item GGNs (for running average)
+        GGN_total = None  # Total GGN, encompassing all per-item GGNs across the dataset
+        GGN_samples = None  # GGN samples, aggregated over one/multiple data batches
+
+        # LTK buffers when iterating over test dataset
+        LTK_samples_buffer = {ltk_batch_size: [] for ltk_batch_size in ltk_batch_sizes}
+        LTK_total_buffer = []
+        pred_distr_samples_buffer = {ltk_batch_size: [] for ltk_batch_size in ltk_batch_sizes}
+        pred_distr_total_buffer = []
+
+        # Iterate over dataset to compute LTK samples
+        for ltk_step_idx, ltk_batch in enumerate(
+            tqdm(
+                ltk_dataloader,
+                desc="LTK-sample-step",
+                disable=no_progress_bar or not uncertainty_quantification,
+            )
+        ):
+            # Compute GGN samples
+            _, J_model, H_loss = compute_ggn_decomp(state, ltk_batch)  # [N, C, D], [N, C, C]
+            if compose_on_cpu:
+                J_model = jax.device_put(J_model, jax.devices('cpu')[0])
+                H_loss = jax.device_put(H_loss, jax.devices('cpu')[0])
+            GGN = compute_ggn_jit(J_model, H_loss)  # [N, D, D]
+
+            # Aggregate GGN samples as running average to save memory
+            aggregated_batch_size = ltk_step_idx + 1
+            if GGN_samples is None:
+                GGN_samples = GGN.copy()  # [N, D, D]
+            else:
+                GGN_samples = aggregate_ggn_jit(
+                    GGN_samples, GGN, aggregated_batch_size
+                )  # [N, D, D]
+
+            # Save GGN samples on disk, if needed aggregated batch size reached
+            if aggregated_batch_size in ltk_batch_sizes:
+                ltk_batch_size_idx = ltk_batch_sizes.index(aggregated_batch_size)
+
+                # Save GGN samples
+                if ltk_batch_size_idx + 1 < len(ltk_batch_sizes):
+                    save_ggn(
+                        GGN_samples,
+                        n_steps,
+                        results_path,
+                        batch_size=aggregated_batch_size,
+                    )
+
+                # Last GGN samples: Stop further GGN computations
+                if ltk_batch_size_idx + 1 == len(ltk_batch_sizes):
+                    GGN_samples = None
                     break
-                aggregated_batch_size = ltk_step_idx + 1
-                if aggregated_batch_size in ltk_batch_sizes:
-                    # Compute Jacobians of the model for test data
-                    y_infer, J_infer, _ = compute_ggn_decomp(state, batch)  # [M, C], [M, C, D]
-                    # For first test batch, initialize GGN_inv with L2 prior, then update
-                    if batch_idx == 0:
-                        assert GGN_inv is None
-                        J_model = jax.device_put(
-                            jnp.stack(J_model_aggregation_buffer, axis=1), device
-                        )  # [N1, N2, C, D]
-                        H_loss = jax.device_put(
-                            jnp.stack(H_loss_aggregation_buffer, axis=1), device
-                        )  # [N1, N2, C, C]
-                        N, _, _, D = J_model.shape
-                        GGN_inv = jnp.broadcast_to(
-                            (1 / l2_reg) * jnp.eye(D)[None, ...], (N, D, D)
-                        )  # [N1, D, D]
-                        GGN_inv = compute_ggn_inv_vmap(J_model, H_loss, GGN_inv)  # [N1, D, D]
+
+        for ltk_batch in tqdm(
+            ltk_total_dataloader,
+            desc="LTK-total-step",
+            disable=no_progress_bar or not uncertainty_quantification,
+        ):
+            # Compute GGN samples
+            _, J_model, H_loss = compute_ggn_decomp(state, ltk_batch)  # [N, C, D], [N, C, C]
+            if compose_on_cpu:
+                J_model = jax.device_put(J_model, jax.devices('cpu')[0])
+                H_loss = jax.device_put(H_loss, jax.devices('cpu')[0])
+            GGN = compute_ggn_jit(J_model, H_loss)  # [N, D, D]
+
+            # Compute total GGN as running average to save memory
+            GGN_counter += GGN.shape[0]
+            if GGN_total is None:
+                GGN_total = jnp.mean(GGN, axis=0)  # [D, D]
+            else:
+                GGN_total = aggregate_ggn_total_jit(GGN_total, GGN, GGN_counter)  # [D, D]
+        GGN_total = jax.device_put(GGN_total, jax.devices('cpu')[0])
+
+    # Start epoch
+    pbar_stats = {"loss": 0.0, "acc": 0.0}
+    with tqdm(
+        total=len(test_dataloader),
+        desc="Test-step",
+        disable=no_progress_bar,
+        postfix=pbar_stats,
+    ) as pbar:
+        # Iterate over dataset for testing
+        for batch_idx, batch in enumerate(test_dataloader):
+            # Perform test steps
+            loss, n_correct_per_class, n_per_class = test_step_jit(state, batch)
+            # Update running statistics
+            loss_epoch.append(loss)
+            n_correct_per_class_epoch = n_correct_per_class_epoch + n_correct_per_class
+            n_per_class_epoch = n_per_class_epoch + n_per_class
+            n_correct = n_correct_per_class.sum()
+            n_correct_epoch += n_correct
+            N = batch[0].shape[0]
+            # Update progress bar
+            pbar.update()
+            pbar_stats["loss"] = round(float(jnp.mean(loss)), 6)
+            pbar_stats["acc"] = round(n_correct / N, 4)
+            pbar.set_postfix(pbar_stats)
+
+            # Uncertainty quantification
+            if uncertainty_quantification:
+                # Compute Jacobians of the model for test data
+                y_infer, J_infer, _ = compute_ggn_decomp(state, batch)  # [M, C], [M, C, D]
+
+                # Load subsampled GGNs, invert them and compute LTKs
+                for ltk_batch_size in ltk_batch_sizes:
+                    GGN_inv = load_ggn(
+                        n_steps, results_path, batch_size=ltk_batch_size
+                    )  # [N, D, D]
+                    GGN_inv = jax.device_put(GGN_inv, device)  # [N, D, D]
+                    GGN_inv = compute_ggn_inv_jit(GGN_inv)  # [N, D, D]
+
                     # Compute LTK and predictive distribution
                     LTK = compute_ltk(J_infer, GGN_inv)  # [N1, M, C, C]  # type: ignore
                     pred_distr = compute_predictive_distribution(y_infer, LTK)  # [N1, M, C]
@@ -861,65 +859,21 @@ def test_epoch(
                     pred_distr_samples_buffer[aggregated_batch_size].append(
                         pred_distr.copy()
                     )  # [N1, M, C]
-                    # Reset GGN_inv after last test batch
-                    if batch_idx == len(test_dataloader) - 1:
-                        GGN_inv = None
-                # Stop further LTK computations, if not needed (only after last sample size and last test datapoints)
-                if (
-                    aggregated_batch_size == ltk_batch_sizes[-1]
-                    and batch_idx == len(test_dataloader) - 1
-                ):
-                    continue_LTK_computation = False
 
-        # No redundant test epochs or LTK computations
-        if not continue_LTK_computation:
-            break
+                # Compute LTK for total GGN
+                GGN_inv = jax.device_put(GGN_total, device)[None, :, :]  # [1, D, D]
+                GGN_inv = compute_ggn_inv_jit(GGN_inv)  # [1, D, D]
 
-    # Iterate over train dataset to compute J_model and H_loss
-    if uncertainty_quantification == "total":
-        J_model_aggregation_buffer.clear()
-        H_loss_aggregation_buffer.clear()
-        GGN_inv = None
-        for ltk_step_idx, ltk_batch in enumerate(
-            tqdm(
-                ltk_total_dataloader,
-                desc="LTK-total-step",
-                disable=no_progress_bar,
-            )
-        ):
-            # Aggregate J_model, H_loss via concatenation
-            _, J_model, H_loss = compute_ggn_decomp(state, ltk_batch)  # [N, C, D], [N, C, C]
-            J_model = jax.device_put(J_model, device_cpu)
-            H_loss = jax.device_put(H_loss, device_cpu)
-            J_model_aggregation_buffer.append(J_model.copy())
-            H_loss_aggregation_buffer.append(H_loss.copy())
-
-        # Iterate over test dataset
-        for batch_idx, batch in enumerate(test_dataloader):
-            # Compute Jacobians of the model for test data
-            y_infer, J_infer, _ = compute_ggn_decomp(state, batch)  # [M, C], [M, C, D]
-            # For first test batch, initialize GGN_inv with L2 prior, then update
-            if batch_idx == 0:
-                assert GGN_inv is None
-                J_model = jax.device_put(
-                    jnp.concatenate(J_model_aggregation_buffer, axis=0), device
-                )  # [N2, C, D]
-                H_loss = jax.device_put(
-                    jnp.concatenate(H_loss_aggregation_buffer, axis=0), device
-                )  # [N2, C, C]
-                D = J_model.shape[2]
-                GGN_inv = (1 / l2_reg) * jnp.eye(D)  # [D, D]
-                GGN_inv = compute_ggn_inv(J_model, H_loss, GGN_inv)  # [D, D]
-            # Compute LTK
-            LTK = compute_ltk(J_infer, GGN_inv[None, ...])  # [1, M, C, C]  # type: ignore
-            pred_distr = compute_predictive_distribution(y_infer, LTK)  # [1, M, C]
-            LTK = jax.device_put(LTK, device_cpu)
-            pred_distr = jax.device_put(pred_distr, device_cpu)
-            LTK_total_buffer.append(LTK[0].copy())  # [M, C, C]
-            pred_distr_total_buffer.append(pred_distr[0].copy())  # [M, C]
+                # Compute LTK and predictive distribution
+                LTK = compute_ltk(J_infer, GGN_inv)  # [N1, M, C, C]  # type: ignore
+                pred_distr = compute_predictive_distribution(y_infer, LTK)  # [N1, M, C]
+                LTK = jax.device_put(LTK, device_cpu)[0]  # [M, C, C]
+                pred_distr = jax.device_put(pred_distr, device_cpu)[0]  # [M, C]
+                LTK_total_buffer.append(LTK.copy())  # [M, C, C]
+                pred_distr_total_buffer.append(pred_distr.copy())  # [M, C]
 
     # Save LTK and predictive distribution results on disk, if computed
-    if uncertainty_quantification == "sampled":
+    if uncertainty_quantification:
         for ltk_batch_size, LTK_samples in LTK_samples_buffer.items():
             save_ltk(jnp.concatenate(LTK_samples, axis=1), n_steps, results_path, ltk_batch_size)
         for pred_distr_batch_size, pred_distr_samples in pred_distr_samples_buffer.items():
@@ -929,7 +883,6 @@ def test_epoch(
                 results_path,
                 pred_distr_batch_size,
             )
-    elif uncertainty_quantification == "total":
         save_ltk(jnp.concatenate(LTK_total_buffer, axis=0), n_steps, results_path)
         save_predictive_distribution(
             jnp.concatenate(pred_distr_total_buffer, axis=0), n_steps, results_path

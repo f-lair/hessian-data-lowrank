@@ -21,7 +21,9 @@ def save_train_log(train_log: Dict[str, List[float]], results_path: str) -> None
 
 def get_save_measure(measure: str, num_classes: int, compose_on_cpu: bool) -> Callable:
     if measure == "frobenius":
-        return save_f_norm
+        return partial(save_f_norm, inv_label=False)
+    if measure == "frobenius-inv":
+        return partial(save_f_norm, inv_label=True)
     elif measure == "eig-overlap":
         return partial(
             save_topc_eigenspace_overlap, num_classes=num_classes, compose_on_cpu=compose_on_cpu
@@ -37,6 +39,7 @@ def save_f_norm(
     step_idx: int,
     results_path: str,
     batch_size: int,
+    inv_label: bool,
 ) -> None:
     # Create results dir, if not existing
     os.makedirs(results_path, exist_ok=True)
@@ -56,10 +59,25 @@ def save_f_norm(
         GGN_1 = jax.device_put(GGN_1, jax.devices('cpu')[0])
         GGN_2 = jax.device_put(GGN_2, jax.devices('cpu')[0])
         f_norm = jnp.linalg.norm(GGN_1 - GGN_2, ord="fro", axis=(-2, -1))
-    jnp.save(
-        str(Path(results_path, f"f_norm_{batch_size}_batched_{step_idx}.npy")),
-        f_norm,
-    )
+        f_norm_rel = f_norm / jnp.linalg.norm(GGN_2, ord="fro", axis=(-2, -1))
+    if inv_label:
+        jnp.save(
+            str(Path(results_path, f"inv_f_norm_{batch_size}_batched_{step_idx}.npy")),
+            f_norm,
+        )
+        jnp.save(
+            str(Path(results_path, f"inv_f_norm_rel_{batch_size}_batched_{step_idx}.npy")),
+            f_norm,
+        )
+    else:
+        jnp.save(
+            str(Path(results_path, f"f_norm_{batch_size}_batched_{step_idx}.npy")),
+            f_norm,
+        )
+        jnp.save(
+            str(Path(results_path, f"f_norm_rel_{batch_size}_batched_{step_idx}.npy")),
+            f_norm,
+        )
 
 
 def compute_topc_eigenspace_overlap(

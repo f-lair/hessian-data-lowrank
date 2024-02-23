@@ -21,7 +21,6 @@ def main() -> None:
         "--train-batch-size", type=int, default=32, help="Batch size for training."
     )
     parser.add_argument("--lr", type=int, default=1e-3, help="Learning rate.")
-    parser.add_argument("--l2-reg", type=float, default=1e-6, help="L2 regularizer weighting.")
     parser.add_argument("--epochs", type=int, default=5, help="Number of training epochs.")
     parser.add_argument(
         "--ggn-batch-size-min-exp",
@@ -50,6 +49,9 @@ def main() -> None:
         help="Number of GGN samples per GGN iteration. Equivalent to the batch size per forward pass in GGN computation.",
     )
     parser.add_argument(
+        "--prior-prec", type=float, default=1.0, help="Prior precision for GGN computation."
+    )
+    parser.add_argument(
         "--measure",
         type=str,
         default="frobenius",
@@ -69,9 +71,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--uq",
-        type=str,
-        default="disabled",
-        help="Computes uncertainty for test data using Laplace Approximations: disabled (default), sampled, total.",
+        default=False,
+        action="store_true",
+        help="Computes uncertainty for test data using Laplace Approximations.",
     )
     parser.add_argument("--rng-seed", type=int, default=7, help="RNG seed.")
     parser.add_argument("--data-path", type=str, default="../data/", help="Data path.")
@@ -165,7 +167,7 @@ def main() -> None:
         train_state, loss, accuracy, accuracy_per_class, n_steps, n_ggn_iterations = train_epoch(
             train_state,
             train_dataloader,
-            args.l2_reg,
+            args.prior_prec,
             ggn_dataloader,
             ggn_total_dataloader,
             ggn_batch_sizes,
@@ -173,6 +175,7 @@ def main() -> None:
             n_ggn_iterations,
             n_steps,
             prng_key,
+            args.measure,
             save_measure,
             args.measure_saving,
             args.ggn_saving,
@@ -193,15 +196,14 @@ def main() -> None:
             test_loss, test_accuracy, test_accuracy_per_class = test_epoch(
                 train_state,
                 test_dataloader,
-                args.l2_reg,
+                args.prior_prec,
                 ggn_dataloader,
                 ggn_total_dataloader,
                 ggn_batch_sizes,
-                (
-                    args.uq if epoch_idx == args.epochs - 1 else "disabled"
-                ),  # UQ only after last epoch
+                (args.uq and epoch_idx == args.epochs - 1),  # UQ only after last epoch
                 n_steps,
                 prng_key,
+                args.compose_on_cpu,
                 args.no_progress_bar,
                 args.results_path,
             )
