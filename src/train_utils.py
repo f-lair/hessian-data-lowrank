@@ -858,8 +858,8 @@ def test_epoch(
                     pred_distr = compute_predictive_distribution(y_infer, LTK)  # [N1, M, C]
                     LTK = jax.device_put(LTK, device_cpu)
                     pred_distr = jax.device_put(pred_distr, device_cpu)
-                    LTK_samples_buffer[aggregated_batch_size].append(LTK.copy())  # [N1, M, C, C]
-                    pred_distr_samples_buffer[aggregated_batch_size].append(
+                    LTK_samples_buffer[ltk_batch_size].append(LTK.copy())  # [N1, M, C, C]
+                    pred_distr_samples_buffer[ltk_batch_size].append(
                         pred_distr.copy()
                     )  # [N1, M, C]
 
