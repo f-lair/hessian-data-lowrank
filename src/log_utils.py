@@ -67,7 +67,7 @@ def save_f_norm(
         )
         jnp.save(
             str(Path(results_path, f"inv_f_norm_rel_{batch_size}_batched_{step_idx}.npy")),
-            f_norm,
+            f_norm_rel,
         )
     else:
         jnp.save(
@@ -76,7 +76,7 @@ def save_f_norm(
         )
         jnp.save(
             str(Path(results_path, f"f_norm_rel_{batch_size}_batched_{step_idx}.npy")),
-            f_norm,
+            f_norm_rel,
         )
 
 
