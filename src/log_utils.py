@@ -95,14 +95,17 @@ def compute_topc_eigenspace_overlap(
     ### ^^^ ### Not implemented in JAX! ### ^^^ ###
 
     # Use approximative LOBPCG instead
-    prng_key_1, prng_key_2 = jax.random.split(prng_key)
-    eigv_1 = jax.random.normal(prng_key_1, (D, num_classes))
-    eigv_2 = jax.random.normal(prng_key_2, (D, num_classes))
-    _, eigv_1, _ = lobpcg_standard(GGN_1, eigv_1)
-    _, eigv_2, _ = lobpcg_standard(GGN_2, eigv_2)
+    # prng_key_1, prng_key_2 = jax.random.split(prng_key)
+    # eigv_1 = jax.random.normal(prng_key_1, (D, num_classes))
+    # eigv_2 = jax.random.normal(prng_key_2, (D, num_classes))
+    # _, eigv_1, _ = lobpcg_standard(GGN_1, eigv_1)
+    # _, eigv_2, _ = lobpcg_standard(GGN_2, eigv_2)
 
-    # _, eigv_1c = eigh(GGN_1, subset_by_index=(D - num_classes, D - 1))
-    # _, eigv_2c = eigh(GGN_2, subset_by_index=(D - num_classes, D - 1))
+    _, eigv_1 = eigh(GGN_1)
+    _, eigv_2 = eigh(GGN_2)
+
+    eigv_1 = jnp.flip(eigv_1[:, -num_classes:], axis=1)
+    eigv_2 = jnp.flip(eigv_2[:, -num_classes:], axis=1)
 
     # print("1", np.linalg.norm(np.asarray(eigv_1) - eigv_1c, ord="fro"))
     # print("2", np.linalg.norm(np.asarray(eigv_2) - eigv_2c, ord="fro"))
