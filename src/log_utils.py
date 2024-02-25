@@ -82,7 +82,7 @@ def save_f_norm(
 
 def compute_topc_eigenspace_overlap(
     GGN_1: jax.Array, GGN_2: jax.Array, prng_key: jax.Array, num_classes: int
-) -> jax.Array:
+) -> Tuple[jax.Array, jax.Array, jax.Array]:
     D, _ = GGN_1.shape
 
     ### vvv ### Not implemented in JAX! ### vvv ###
@@ -101,8 +101,8 @@ def compute_topc_eigenspace_overlap(
     # _, eigv_1, _ = lobpcg_standard(GGN_1, eigv_1)
     # _, eigv_2, _ = lobpcg_standard(GGN_2, eigv_2)
 
-    _, eigv_1 = eigh(GGN_1)
-    _, eigv_2 = eigh(GGN_2)
+    eigw_1, eigv_1 = eigh(GGN_1)
+    eigw_2, eigv_2 = eigh(GGN_2)
 
     eigv_1 = jnp.flip(eigv_1[:, -num_classes:], axis=1)
     eigv_2 = jnp.flip(eigv_2[:, -num_classes:], axis=1)
@@ -111,8 +111,11 @@ def compute_topc_eigenspace_overlap(
     # print("2", np.linalg.norm(np.asarray(eigv_2) - eigv_2c, ord="fro"))
 
     # Tr(P^{U} @ P^{V}) / (Tr(P^{U}) * Tr(P^{V}))^(-0.5)
-    return jnp.einsum("ij,ij->", eigv_1 @ eigv_1.T, eigv_2 @ eigv_2.T) / jnp.sqrt(
-        jnp.einsum("ij,ij->", eigv_1, eigv_1) * jnp.einsum("ij,ij->", eigv_2, eigv_2)
+    return (
+        jnp.einsum("ij,ij->", eigv_1 @ eigv_1.T, eigv_2 @ eigv_2.T)
+        / jnp.sqrt(jnp.einsum("ij,ij->", eigv_1, eigv_1) * jnp.einsum("ij,ij->", eigv_2, eigv_2)),
+        eigw_1,
+        eigw_2,
     )
 
 
@@ -176,7 +179,7 @@ def save_topc_eigenspace_overlap(
         in_axes=(None, 0, 1),
     )
 
-    topc_eigenspace_overlap = compute_topc_eigenspace_overlap_vmap(
+    topc_eigenspace_overlap, eigw_1, eigw_2 = compute_topc_eigenspace_overlap_vmap(
         GGN_1,
         GGN_2,
         prng_key_vmap,
@@ -185,6 +188,14 @@ def save_topc_eigenspace_overlap(
     jnp.save(
         str(Path(results_path, f"eig_overlap_{batch_size}_batched_{step_idx}.npy")),
         topc_eigenspace_overlap,
+    )
+    jnp.save(
+        str(Path(results_path, f"eigvals_{batch_size}_batched_{step_idx}.npy")),
+        eigw_1,
+    )
+    jnp.save(
+        str(Path(results_path, f"eigvals_total_{step_idx}.npy")),
+        eigw_2,
     )
 
 
