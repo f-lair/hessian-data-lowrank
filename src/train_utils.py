@@ -801,7 +801,6 @@ def test_epoch(
             GGN_counter += GGN.shape[0]
             if GGN_total is None:
                 GGN_total = jnp.mean(GGN, axis=0)  # [D, D]
-                break
             else:
                 GGN_total = aggregate_ggn_total_jit(GGN_total, GGN, GGN_counter)  # [D, D]
         GGN_total = compute_ggn_inv_jit(GGN_total[None, :, :])  # type: ignore [1, D, D]
