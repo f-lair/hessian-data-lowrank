@@ -553,7 +553,7 @@ def train_epoch(
                             / ggn_dataloader.sampler.data_len
                         )
                         if GGN_samples is None:
-                            GGN_samples = GGN.copy()  # [N, D, D]
+                            GGN_samples = GGN.copy() * weight_factor  # [N, D, D]
                         else:
                             GGN_samples = aggregate_ggn_jit(
                                 GGN_samples, GGN, weight_factor
@@ -771,7 +771,7 @@ def test_epoch(
                     / ltk_dataloader.sampler.data_len
                 )
                 if GGN_samples is None:
-                    GGN_samples = GGN.copy()  # [N, D, D]
+                    GGN_samples = GGN.copy() * weight_factor  # [N, D, D]
                 else:
                     GGN_samples = aggregate_ggn_jit(GGN_samples, GGN, weight_factor)  # [N, D, D]
 
