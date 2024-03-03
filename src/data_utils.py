@@ -7,7 +7,7 @@ from torch.utils import data
 from torchvision.datasets import MNIST
 from torchvision.transforms.v2.functional import resize
 
-from sampler import GradnormSampler, LossSampler
+from sampler import GradnormSampler, LossSampler, WeightedBinnedSampler
 
 
 def get_dataset(dataset: str, train: bool, px: int, path: str) -> data.Dataset:
@@ -137,6 +137,16 @@ def get_sampler(
             inverse=True,
             classwise=False,
             classeq=True,
+            no_progress_bar=no_progress_bar,
+        )
+    elif sampling == "loss-binned":
+        return WeightedBinnedSampler(
+            dataset,
+            rng,
+            test_step_fn,
+            batch_size,
+            replacement_stride=replacement_stride,
+            num_bins=0,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm":

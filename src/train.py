@@ -40,7 +40,7 @@ def main() -> None:
         "--ggn-sampling",
         type=str,
         default="uniform",
-        help="Sampling method for GGN computation: uniform (default), loss(-x), gradnorm(-x); x={inv, class, classeq, class-inv, classeq-inv}.",
+        help="Sampling method for GGN computation: uniform (default), loss(-x); x={inv, class, classeq, class-inv, classeq-inv, binned}.",
     )
     parser.add_argument(
         "--ggn-samples",

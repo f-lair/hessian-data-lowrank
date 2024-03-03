@@ -22,7 +22,7 @@ from log_utils import (
     save_ltk,
     save_predictive_distribution,
 )
-from sampler import WeightedSampler
+from sampler import WeightedBinnedSampler
 
 
 def train_step(
@@ -307,6 +307,26 @@ def aggregate_samples(
     return average + (samples - average) / aggregated_sample_size  # [N, ...]
 
 
+def aggregate_samples_weighted(
+    weighted_sum: jax.Array, samples: jax.Array, weight: float
+) -> jax.Array:
+    """
+    Aggregates samples as weighted sum.
+    N: Batch dim.
+
+    Args:
+        weighted_sum (jax.Array): Previous weighted sum ([N, ...]).
+        samples (jax.Array): New samples ([N, ...]).
+        weight (float): Weight.
+
+    Returns:
+        jax.Array: Aggregated weighted sum ([N, ...]).
+    """
+
+    # Aggregates samples as weighted sum
+    return weighted_sum + weight * samples  # [N, ...]
+
+
 def aggregate_samples_total(
     average_total: jax.Array, samples: jax.Array, aggregated_sample_size: int
 ) -> jax.Array:
@@ -455,7 +475,7 @@ def train_epoch(
     # Compute GGN realization on CPU, if needed
     device = jax.devices("cpu")[0] if compose_on_cpu else None
     compute_ggn_jit = jax.jit(partial(compute_ggn, prior_precision=prior_precision), device=device)
-    aggregate_ggn_jit = jax.jit(aggregate_samples, device=device)
+    aggregate_ggn_jit = jax.jit(aggregate_samples_weighted, device=device)
     aggregate_ggn_total_jit = jax.jit(aggregate_samples_total, device=device)
 
     # Running statistics
@@ -464,6 +484,11 @@ def train_epoch(
     n_correct_per_class_epoch = jnp.zeros((n_classes,), dtype=int)
     n_per_class_epoch = jnp.zeros_like(n_correct_per_class_epoch)
     GGN_iter_counter = 0  # Number of already completed GGN iterations
+
+    assert measure_saving in {
+        "total",
+        "disabled",
+    }, "This branch assumes total-/disabled-measure-saving!"
 
     # Start epoch
     pbar_stats = {"loss": 0.0, "acc": 0.0}
@@ -483,102 +508,65 @@ def train_epoch(
 
                 # Update weights, if WeightedSampler is used
                 if not ggn_computations_disabled and isinstance(
-                    ggn_dataloader.sampler, WeightedSampler
+                    ggn_dataloader.sampler, WeightedBinnedSampler
                 ):
                     ggn_dataloader.sampler.update(state)
+                else:
+                    assert ValueError("This branch assumes LossBinned sampling!")
 
-                # Iterate over dataset for GGN samples computation
-                for ggn_step_idx, ggn_batch in enumerate(
-                    tqdm(
-                        ggn_dataloader,
-                        desc="GGN-sample-step",
-                        disable=no_progress_bar or ggn_computations_disabled,
-                    )
+                # Iterate over ggn batch sizes
+                for ggn_batch_size in tqdm(
+                    ggn_batch_sizes,
+                    desc="GGN-sample-size-step",
+                    disable=no_progress_bar or ggn_computations_disabled,
                 ):
                     # No GGN computations during training needed
                     if ggn_computations_disabled:
                         break
 
-                    # Compute GGN samples
-                    _, J_model, H_loss = compute_ggn_decomp(
-                        state, ggn_batch
-                    )  # [N, C, D], [N, C, C]
-                    if compose_on_cpu:
-                        J_model = jax.device_put(J_model, jax.devices('cpu')[0])
-                        H_loss = jax.device_put(H_loss, jax.devices('cpu')[0])
-                    GGN = compute_ggn_jit(J_model, H_loss)  # [N, D, D]
+                    if not ggn_computations_disabled and isinstance(
+                        ggn_dataloader.sampler, WeightedBinnedSampler
+                    ):
+                        ggn_dataloader.sampler.num_bins = ggn_batch_size
 
-                    # Aggregate GGN samples as running average to save memory
-                    aggregated_batch_size = ggn_step_idx + 1
-                    if GGN_samples is None:
-                        GGN_samples = GGN.copy()  # [N, D, D]
-                    else:
-                        GGN_samples = aggregate_ggn_jit(
-                            GGN_samples, GGN, aggregated_batch_size
-                        )  # [N, D, D]
-
-                    # Save GGN samples on disk, if needed aggregated batch size reached
-                    if aggregated_batch_size in ggn_batch_sizes:
-                        ggn_batch_size_idx = ggn_batch_sizes.index(aggregated_batch_size)
-
-                        if ggn_batch_size_idx > 0:
-                            prev_ggn_batch_size = ggn_batch_sizes[ggn_batch_size_idx - 1]
-                            # Norm-saving "next": Load previous batched GGN samples, compute norm
-                            if measure_saving == "next":
-                                prev_GGN_samples = load_ggn(
-                                    n_steps, results_path, batch_size=prev_ggn_batch_size
-                                )
-                                save_measure(
-                                    prev_GGN_samples,
-                                    GGN_samples,
-                                    prng_key,
-                                    n_steps,
-                                    results_path,
-                                    prev_ggn_batch_size,
-                                )
-                            # GGN-saving "disabled" and not norm-saving "total" or "last": Remove previous batched GGN samples
-                            if ggn_saving == "disabled" and measure_saving not in {
-                                "total",
-                                "last",
-                            }:
-                                remove_ggn(n_steps, results_path, batch_size=prev_ggn_batch_size)
-
-                        # Not norm-saving "next" or not ggn-saving "disabled" or not last GGN samples: Save GGN samples
-                        if (
-                            measure_saving != "next"
-                            or ggn_saving != "disabled"
-                            or ggn_batch_size_idx + 1 < len(ggn_batch_sizes)
-                        ):
-                            save_ggn(
-                                GGN_samples,
-                                n_steps,
-                                results_path,
-                                batch_size=aggregated_batch_size,
-                            )
-
-                        # Last GGN samples: Stop further GGN computations
-                        if ggn_batch_size_idx + 1 == len(ggn_batch_sizes):
-                            break
-                # Norm-saving "last": Compute norm
-                if measure_saving == "last":
-                    GGN_samples_last = load_ggn(
-                        n_steps, results_path, batch_size=ggn_batch_sizes[-1]
-                    )
-                    for ggn_batch_size in ggn_batch_sizes[:-1]:
-                        GGN_samples = load_ggn(n_steps, results_path, batch_size=ggn_batch_size)
-                        save_measure(
-                            GGN_samples,
-                            GGN_samples_last,
-                            prng_key,
-                            n_steps,
-                            results_path,
-                            ggn_batch_size,
+                    # Iterate over dataset for GGN samples computation
+                    for ggn_step_idx, ggn_batch in enumerate(
+                        tqdm(
+                            ggn_dataloader,
+                            desc="GGN-sample-step",
+                            disable=no_progress_bar or ggn_computations_disabled,
                         )
-                        # GGN-saving "disabled" : Remove batched GGN samples
-                        if ggn_saving == "disabled":
-                            remove_ggn(n_steps, results_path, batch_size=ggn_batch_size)
-                    if ggn_saving == "disabled":
-                        remove_ggn(n_steps, results_path, batch_size=ggn_batch_sizes[-1])
+                    ):
+
+                        # Compute GGN samples
+                        _, J_model, H_loss = compute_ggn_decomp(
+                            state, ggn_batch
+                        )  # [N, C, D], [N, C, C]
+                        if compose_on_cpu:
+                            J_model = jax.device_put(J_model, jax.devices('cpu')[0])
+                            H_loss = jax.device_put(H_loss, jax.devices('cpu')[0])
+                        GGN = compute_ggn_jit(J_model, H_loss)  # [N, D, D]
+
+                        # Aggregate GGN samples as running weighted to save memory
+                        weight_factor = (
+                            len(ggn_dataloader.sampler.binned_indices[ggn_step_idx])
+                            / ggn_dataloader.sampler.data_len
+                        )
+                        if GGN_samples is None:
+                            GGN_samples = GGN.copy()  # [N, D, D]
+                        else:
+                            GGN_samples = aggregate_ggn_jit(
+                                GGN_samples, GGN, weight_factor
+                            )  # [N, D, D]
+
+                    # Save GGN samples on disk
+                    save_ggn(
+                        GGN_samples,
+                        n_steps,
+                        results_path,
+                        batch_size=ggn_batch_size,
+                    )
+                    GGN_samples = None
 
                 # Norm-saving "disabled" or "total": Iterate over dataset for total GGN computation
                 if measure_saving in {"disabled", "total"}:
@@ -726,8 +714,10 @@ def test_epoch(
 
     if uncertainty_quantification:
         # Update weights for UQ, if WeightedSampler is used
-        if isinstance(ltk_dataloader.sampler, WeightedSampler):
+        if isinstance(ltk_dataloader.sampler, WeightedBinnedSampler):
             ltk_dataloader.sampler.update(state)
+        else:
+            assert ValueError("This branch assumes LossBinned sampling!")
 
         # Compute GGN realization on CPU, if needed
         device = jax.devices("cpu")[0] if compose_on_cpu else None
@@ -735,7 +725,7 @@ def test_epoch(
         compute_ggn_jit = jax.jit(
             partial(compute_ggn, prior_precision=prior_precision), device=device
         )
-        aggregate_ggn_jit = jax.jit(aggregate_samples, device=device)
+        aggregate_ggn_jit = jax.jit(aggregate_samples_weighted, device=device)
         aggregate_ggn_total_jit = jax.jit(aggregate_samples_total, device=device)
         compute_ggn_inv_jit = jax.vmap(jax.jit(compute_ggn_inv, device=device))
 
@@ -751,49 +741,49 @@ def test_epoch(
         pred_distr_samples_buffer = {ltk_batch_size: [] for ltk_batch_size in ltk_batch_sizes}
         pred_distr_total_buffer = []
 
-        # Iterate over dataset to compute LTK samples
-        for ltk_step_idx, ltk_batch in enumerate(
-            tqdm(
-                ltk_dataloader,
-                desc="LTK-sample-step",
-                disable=no_progress_bar or not uncertainty_quantification,
-            )
+        # Iterate over ggn batch sizes
+        for ltk_batch_size in tqdm(
+            ltk_batch_sizes,
+            desc="LTK-sample-size-step",
+            disable=no_progress_bar or not uncertainty_quantification,
         ):
-            # Compute GGN samples
-            _, J_model, H_loss = compute_ggn_decomp(state, ltk_batch)  # [N, C, D], [N, C, C]
-            if compose_on_cpu:
-                J_model = jax.device_put(J_model, jax.devices('cpu')[0])
-                H_loss = jax.device_put(H_loss, jax.devices('cpu')[0])
-            GGN = compute_ggn_jit(J_model, H_loss)  # [N, D, D]
+            if isinstance(ltk_dataloader.sampler, WeightedBinnedSampler):
+                ltk_dataloader.sampler.num_bins = ltk_batch_size
 
-            # Aggregate GGN samples as running average to save memory
-            aggregated_batch_size = ltk_step_idx + 1
-            if GGN_samples is None:
-                GGN_samples = GGN.copy()  # [N, D, D]
-            else:
-                GGN_samples = aggregate_ggn_jit(
-                    GGN_samples, GGN, aggregated_batch_size
-                )  # [N, D, D]
+            # Iterate over dataset to compute LTK samples
+            for ltk_step_idx, ltk_batch in enumerate(
+                tqdm(
+                    ltk_dataloader,
+                    desc="LTK-sample-step",
+                    disable=no_progress_bar or not uncertainty_quantification,
+                )
+            ):
+                # Compute GGN samples
+                _, J_model, H_loss = compute_ggn_decomp(state, ltk_batch)  # [N, C, D], [N, C, C]
+                if compose_on_cpu:
+                    J_model = jax.device_put(J_model, jax.devices('cpu')[0])
+                    H_loss = jax.device_put(H_loss, jax.devices('cpu')[0])
+                GGN = compute_ggn_jit(J_model, H_loss)  # [N, D, D]
 
-            # Save GGN samples on disk, if needed aggregated batch size reached
-            if aggregated_batch_size in ltk_batch_sizes:
-                ltk_batch_size_idx = ltk_batch_sizes.index(aggregated_batch_size)
+                # Aggregate GGN samples as running weighted to save memory
+                weight_factor = (
+                    len(ltk_dataloader.sampler.binned_indices[ltk_step_idx])
+                    / ltk_dataloader.sampler.data_len
+                )
+                if GGN_samples is None:
+                    GGN_samples = GGN.copy()  # [N, D, D]
+                else:
+                    GGN_samples = aggregate_ggn_jit(GGN_samples, GGN, weight_factor)  # [N, D, D]
 
-                # Save GGN samples
-                if ltk_batch_size_idx + 1 <= len(ltk_batch_sizes):
-                    GGN_inv = compute_ggn_inv_jit(GGN_samples)  # [N, D, D]
-                    save_ggn(
-                        GGN_inv,
-                        n_steps,
-                        results_path,
-                        batch_size=aggregated_batch_size,
-                    )
-
-                # Last GGN samples: Stop further GGN computations
-                if ltk_batch_size_idx + 1 == len(ltk_batch_sizes):
-                    GGN_samples = None
-                    GGN_inv = None
-                    break
+            GGN_inv = compute_ggn_inv_jit(GGN_samples)  # [N, D, D]
+            save_ggn(
+                GGN_inv,
+                n_steps,
+                results_path,
+                batch_size=ltk_batch_size,
+            )
+            GGN_samples = None
+            GGN_inv = None
 
         for ltk_batch in tqdm(
             ltk_total_dataloader,
@@ -811,6 +801,7 @@ def test_epoch(
             GGN_counter += GGN.shape[0]
             if GGN_total is None:
                 GGN_total = jnp.mean(GGN, axis=0)  # [D, D]
+                break
             else:
                 GGN_total = aggregate_ggn_total_jit(GGN_total, GGN, GGN_counter)  # [D, D]
         GGN_total = compute_ggn_inv_jit(GGN_total[None, :, :])  # type: ignore [1, D, D]

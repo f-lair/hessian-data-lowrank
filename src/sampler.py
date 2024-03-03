@@ -364,3 +364,127 @@ class GradnormSampler(WeightedSampler):
             weights[indices] = torch.from_numpy(np.linalg.norm(np.array(d_loss), ord=2, axis=1))
 
         return weights
+
+
+class WeightedBinnedSampler(data.Sampler[int]):
+    """PyTorch data sampler with weight-based binned sampling."""
+
+    def __init__(
+        self,
+        data_source: data.Dataset,
+        rng: Generator,
+        step_fn: Callable,
+        batch_size: int,
+        replacement_stride: int,
+        num_bins: int,
+        no_progress_bar: bool,
+    ) -> None:
+        """
+        Initializes data sampler.
+
+        Args:
+            data_source (data.Dataset): Dataset.
+            rng (Generator): Random number generator.
+            step_fn (Callable): Jax function that takes a training state and batch and computes the loss.
+            batch_size (int): Batch size for loss computations.
+            replacement_stride (int): Number of consecutive sampled datapoints that can be identical.
+            num_bins (int): Number of bins.
+            no_progress_bar (bool): Disables progress bar.
+        """
+
+        self.data_source = data_source
+        self.rng = rng
+        self.step_fn = jax.jit(partial(step_fn, n_classes=len(data_source.classes)))
+        self.batch_size = batch_size
+        self.replacement_stride = replacement_stride
+        self.num_bins = num_bins
+
+        self.no_progress_bar = no_progress_bar
+
+        self.data_len = len(self.data_source)  # type: ignore
+        self.batch_indices = [
+            list(range(idx * self.batch_size, min((idx + 1) * self.batch_size, self.data_len)))
+            for idx in range(math.ceil(self.data_len / self.batch_size))
+        ]
+
+        self.weights = torch.ones((self.data_len,))
+
+    def _get_updated_weights(self, state: TrainState) -> torch.Tensor:
+        """
+        Updates weights by forward pass over the whole dataset.
+
+        Args:
+            state (TrainState): Current training state.
+
+        Returns:
+            torch.Tensor: Updated sampling weights.
+        """
+
+        weights = torch.zeros((self.data_len,))
+
+        for indices in tqdm(
+            self.batch_indices, desc="Sampler Update", disable=self.no_progress_bar
+        ):
+            batch = DataLoader.collate_fn([self.data_source[idx] for idx in indices])
+            loss, _, _ = self.step_fn(state, batch)
+            weights[indices] = torch.from_numpy(np.array(loss))
+
+        return weights
+
+    def update(self, state: TrainState) -> None:
+        """
+        Updates weights.
+
+        Args:
+            state (TrainState): Current training state.
+        """
+
+        self.weights = self._get_updated_weights(state) + 1e-8
+
+    def update_binned_indices(self):
+        bin_range = (
+            torch.log10(torch.amin(self.weights)).item(),
+            torch.log10(torch.amax(self.weights)).item(),
+        )
+
+        bins = torch.logspace(bin_range[0], bin_range[1], self.num_bins + 1)
+        bins[-1] = torch.inf
+        binned_weights = torch.bucketize(self.weights, bins, right=True)
+        self.binned_indices = [
+            torch.nonzero(binned_weights == bin_idx)[:, 0]
+            for bin_idx in range(1, self.num_bins + 1)
+        ]
+
+    def __len__(self) -> int:
+        """
+        Returns number of samples, being equal to the number of bins.
+
+        Returns:
+            int: Number of samples.
+        """
+
+        return self.num_bins * self.replacement_stride
+
+    def __iter__(self) -> Iterator[int]:
+        """
+        Builds iterator over sampled data items according to loss-based probability distribution.
+
+        Yields:
+            Iterator[int]: Iterator over sampled data items.
+        """
+
+        self.update_binned_indices()
+
+        perms = [
+            self.binned_indices[bin_idx][
+                torch.multinomial(
+                    torch.ones((len(self.binned_indices[bin_idx]),)),
+                    self.replacement_stride,
+                    True,
+                )
+            ]
+            for bin_idx in range(self.num_bins)
+        ]
+
+        perm = torch.cat(perms)
+        yield from perm.tolist()
