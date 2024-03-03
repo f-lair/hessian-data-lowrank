@@ -476,13 +476,17 @@ class WeightedBinnedSampler(data.Sampler[int]):
         self.update_binned_indices()
 
         perms = [
-            self.binned_indices[bin_idx][
-                torch.multinomial(
-                    torch.ones((len(self.binned_indices[bin_idx]),)),
-                    self.replacement_stride,
-                    True,
-                )
-            ]
+            (
+                self.binned_indices[bin_idx][
+                    torch.multinomial(
+                        torch.ones((len(self.binned_indices[bin_idx]),)),
+                        self.replacement_stride,
+                        True,
+                    )
+                ]
+                if len(self.binned_indices[bin_idx]) > 0
+                else torch.zeros((self.replacement_stride,), dtype=torch.int64)
+            )
             for bin_idx in range(self.num_bins)
         ]
 
