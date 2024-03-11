@@ -24,8 +24,8 @@ class WeightedSampler(data.Sampler[int]):
         batch_size: int,
         replacement_stride: int,
         inverse: bool,
-        classwise: bool,
-        classeq: bool,
+        inter: bool,
+        intra: bool,
         no_progress_bar: bool,
     ) -> None:
         """
@@ -37,8 +37,8 @@ class WeightedSampler(data.Sampler[int]):
             batch_size (int): Batch size for loss computations.
             replacement_stride (int): Number of consecutive sampled datapoints that can be identical.
             inverse (bool): If set, samples data items with lowest weight with highest probability.
-            classwise (bool): If set, samples class weight-based and intra-class uniformly.
-            classeq (bool): If set, samples class uniformly and intra-class weight-based.
+            inter (bool): If set, samples class weight-based and intra-class uniformly.
+            intra (bool): If set, samples class uniformly and intra-class weight-based.
             no_progress_bar (bool): Disables progress bar.
         """
 
@@ -47,10 +47,10 @@ class WeightedSampler(data.Sampler[int]):
         self.batch_size = batch_size
         self.replacement_stride = replacement_stride
         self.inverse = inverse
-        self.classwise = classwise
-        self.classeq = classeq
+        self.inter = inter
+        self.intra = intra
 
-        assert not (self.classwise and self.classeq), "Invalid WeightedSampler configuration!"
+        assert not (self.inter and self.intra), "Invalid WeightedSampler configuration!"
 
         self.no_progress_bar = no_progress_bar
 
@@ -60,10 +60,10 @@ class WeightedSampler(data.Sampler[int]):
             for idx in range(math.ceil(self.data_len / self.batch_size))
         ]
 
-        if self.classwise:
+        if self.inter:
             self.class_assignments, self.class_counts = self._get_class_assignments()
             self.weights = torch.ones((len(self.class_assignments),))
-        elif self.classeq:
+        elif self.intra:
             self.class_assignments, self.class_counts = self._get_class_assignments()
             self.weights = torch.ones((self.data_len,))
         else:
@@ -116,7 +116,7 @@ class WeightedSampler(data.Sampler[int]):
 
         weights = self._get_updated_weights(state)
 
-        if self.classwise:
+        if self.inter:
             for class_idx, data_indices in self.class_assignments.items():
                 self.weights[class_idx] = torch.mean(weights[data_indices])
         else:
@@ -127,12 +127,23 @@ class WeightedSampler(data.Sampler[int]):
         if self.inverse:
             self.weights = 1.0 / self.weights
 
-        # torch.save(self.weights, "../results/distr/gradnorm_class_inv_distr.pth")
-
     @staticmethod
     def multinomial_limited(
         weights: torch.Tensor, n_samples: int, limits: torch.Tensor, generator: torch.Generator
     ) -> torch.Tensor:
+        """
+        Draws from a multinomial distribution without replacement, where the number of available items per class is limited.
+
+        Args:
+            weights (torch.Tensor): Weight per class.
+            n_samples (int): Number of samples to be draws.
+            limits (torch.Tensor): Available items per class.
+            generator (torch.Generator): Random number generator.
+
+        Returns:
+            torch.Tensor: Sampled items.
+        """
+
         limits_ = limits.clone()
         limits_mask = limits_ > 0
         if torch.count_nonzero(limits_mask) > 1:
@@ -177,10 +188,10 @@ class WeightedSampler(data.Sampler[int]):
             Iterator[int]: Iterator over sampled data items.
         """
 
-        if self.classwise or self.classeq:
+        if self.inter or self.intra:
             perms = []
             for idx in range(self.replacement_stride):
-                if self.classwise:
+                if self.inter:
                     # Weighted inter-class distribution
                     perm_interclass = self.multinomial_limited(
                         self.weights, self.data_len, self.class_counts, self.rng
@@ -247,8 +258,8 @@ class LossSampler(WeightedSampler):
         batch_size: int,
         replacement_stride: int,
         inverse: bool,
-        classwise: bool,
-        classeq: bool,
+        inter: bool,
+        intra: bool,
         no_progress_bar: bool,
     ) -> None:
         """
@@ -261,8 +272,8 @@ class LossSampler(WeightedSampler):
             batch_size (int): Batch size for loss computations.
             replacement_stride (int): Number of consecutive sampled datapoints that can be identical.
             inverse (bool): If set, samples data items with lowest loss with highest probability.
-            classwise (bool): If set, samples class loss-based and intra-class uniformly.
-            classeq (bool): If set, samples class uniformly and intra-class weight-based.
+            inter (bool): If set, samples class loss-based and intra-class uniformly.
+            intra (bool): If set, samples class uniformly and intra-class weight-based.
             no_progress_bar (bool): Disables progress bar.
         """
 
@@ -272,8 +283,8 @@ class LossSampler(WeightedSampler):
             batch_size,
             replacement_stride,
             inverse,
-            classwise,
-            classeq,
+            inter,
+            intra,
             no_progress_bar,
         )
         self.step_fn = jax.jit(partial(step_fn, n_classes=len(data_source.classes)))  # type: ignore
@@ -312,8 +323,8 @@ class GradnormSampler(WeightedSampler):
         batch_size: int,
         replacement_stride: int,
         inverse: bool,
-        classwise: bool,
-        classeq: bool,
+        inter: bool,
+        intra: bool,
         no_progress_bar: bool,
     ) -> None:
         """
@@ -326,8 +337,8 @@ class GradnormSampler(WeightedSampler):
             batch_size (int): Batch size for gradient computations.
             replacement_stride (int): Number of consecutive sampled datapoints that can be identical.
             inverse (bool): If set, samples data items with lowest gradient-norm with highest probability.
-            classwise (bool): If set, samples class loss-based and intra-class uniformly.
-            classeq (bool): If set, samples class uniformly and intra-class weight-based.
+            inter (bool): If set, samples class loss-based and intra-class uniformly.
+            intra (bool): If set, samples class uniformly and intra-class weight-based.
             no_progress_bar (bool): Disables progress bar.
         """
 
@@ -337,8 +348,8 @@ class GradnormSampler(WeightedSampler):
             batch_size,
             replacement_stride,
             inverse,
-            classwise,
-            classeq,
+            inter,
+            intra,
             no_progress_bar,
         )
         self.step_fn = jax.jit(partial(step_fn, n_classes=len(data_source.classes), return_grad=True))  # type: ignore

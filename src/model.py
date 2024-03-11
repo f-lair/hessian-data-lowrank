@@ -1,5 +1,10 @@
+from typing import Any, Callable
+
 import jax
+import optax
 from flax import linen as nn
+from flax.core.frozen_dict import FrozenDict
+from flax.training.train_state import TrainState
 
 
 def get_model(dataset: str, hidden_dim: int) -> nn.Module:

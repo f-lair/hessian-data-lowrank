@@ -75,8 +75,8 @@ def get_sampler(
             batch_size,
             replacement_stride=replacement_stride,
             inverse=False,
-            classwise=False,
-            classeq=False,
+            inter=False,
+            intra=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "loss-inv":
@@ -87,11 +87,11 @@ def get_sampler(
             batch_size,
             replacement_stride=replacement_stride,
             inverse=True,
-            classwise=False,
-            classeq=False,
+            inter=False,
+            intra=False,
             no_progress_bar=no_progress_bar,
         )
-    elif sampling == "loss-class":
+    elif sampling == "loss-inter":
         return LossSampler(
             dataset,
             rng,
@@ -99,11 +99,11 @@ def get_sampler(
             batch_size,
             replacement_stride=replacement_stride,
             inverse=False,
-            classwise=True,
-            classeq=False,
+            inter=True,
+            intra=False,
             no_progress_bar=no_progress_bar,
         )
-    elif sampling == "loss-classeq":
+    elif sampling == "loss-intra":
         return LossSampler(
             dataset,
             rng,
@@ -111,11 +111,11 @@ def get_sampler(
             batch_size,
             replacement_stride=replacement_stride,
             inverse=False,
-            classwise=False,
-            classeq=True,
+            inter=False,
+            intra=True,
             no_progress_bar=no_progress_bar,
         )
-    elif sampling == "loss-class-inv":
+    elif sampling == "loss-inter-inv":
         return LossSampler(
             dataset,
             rng,
@@ -123,11 +123,11 @@ def get_sampler(
             batch_size,
             replacement_stride=replacement_stride,
             inverse=True,
-            classwise=True,
-            classeq=False,
+            inter=True,
+            intra=False,
             no_progress_bar=no_progress_bar,
         )
-    elif sampling == "loss-classeq-inv":
+    elif sampling == "loss-intra-inv":
         return LossSampler(
             dataset,
             rng,
@@ -135,8 +135,8 @@ def get_sampler(
             batch_size,
             replacement_stride=replacement_stride,
             inverse=True,
-            classwise=False,
-            classeq=True,
+            inter=False,
+            intra=True,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm":
@@ -147,8 +147,8 @@ def get_sampler(
             batch_size,
             replacement_stride=replacement_stride,
             inverse=False,
-            classwise=False,
-            classeq=False,
+            inter=False,
+            intra=False,
             no_progress_bar=no_progress_bar,
         )
     elif sampling == "gradnorm-inv":
@@ -159,11 +159,11 @@ def get_sampler(
             batch_size,
             replacement_stride=replacement_stride,
             inverse=True,
-            classwise=False,
-            classeq=False,
+            inter=False,
+            intra=False,
             no_progress_bar=no_progress_bar,
         )
-    elif sampling == "gradnorm-class":
+    elif sampling == "gradnorm-inter":
         return GradnormSampler(
             dataset,
             rng,
@@ -171,11 +171,11 @@ def get_sampler(
             batch_size,
             replacement_stride=replacement_stride,
             inverse=False,
-            classwise=True,
-            classeq=False,
+            inter=True,
+            intra=False,
             no_progress_bar=no_progress_bar,
         )
-    elif sampling == "gradnorm-classeq":
+    elif sampling == "gradnorm-intra":
         return GradnormSampler(
             dataset,
             rng,
@@ -183,11 +183,11 @@ def get_sampler(
             batch_size,
             replacement_stride=replacement_stride,
             inverse=False,
-            classwise=False,
-            classeq=True,
+            inter=False,
+            intra=True,
             no_progress_bar=no_progress_bar,
         )
-    elif sampling == "gradnorm-class-inv":
+    elif sampling == "gradnorm-inter-inv":
         return GradnormSampler(
             dataset,
             rng,
@@ -195,11 +195,11 @@ def get_sampler(
             batch_size,
             replacement_stride=replacement_stride,
             inverse=True,
-            classwise=True,
-            classeq=False,
+            inter=True,
+            intra=False,
             no_progress_bar=no_progress_bar,
         )
-    elif sampling == "gradnorm-classeq-inv":
+    elif sampling == "gradnorm-intra-inv":
         return GradnormSampler(
             dataset,
             rng,
@@ -207,8 +207,8 @@ def get_sampler(
             batch_size,
             replacement_stride=replacement_stride,
             inverse=True,
-            classwise=False,
-            classeq=True,
+            inter=False,
+            intra=True,
             no_progress_bar=no_progress_bar,
         )
     else:
